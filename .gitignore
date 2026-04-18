@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+python_modules/
+
+# Environment variables - 包含敏感信息，不要提交
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+out/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pip-debug.log*
+
+# Trae
+.trae/
+
+# npmrc
+.npmrc
+
+# Code review report
+CODE_REVIEW_REPORT.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Configuration files - 包含敏感信息
+config/
+
+# Workspaces
+workspaces/
+
+# Testing
+.pytest_cache/
+coverage/
+
+# Electron
+electron-builder.yml
+
+# CLI
+bin/
+
+# Web
+Web/node_modules/
+Web/dist/
+
+# Desktop
+Desktop/node_modules/
+Desktop/dist/
+Desktop/build/
+
+# Temporary files
+*.tmp
+*.temp
+
+#UI图片
+picture/
