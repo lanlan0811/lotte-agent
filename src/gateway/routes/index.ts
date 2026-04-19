@@ -8,6 +8,8 @@ import { registerToolRoutes } from "./tools.js";
 import { registerApprovalRoutes } from "./approval.js";
 import { registerLogRoutes } from "./logs.js";
 import { registerHealthRoutes } from "./health.js";
+import { registerMCPRoutes } from "./mcp.js";
+import { registerSkillRoutes } from "./skills.js";
 import { registerOpenAICompatRoutes } from "../openai-compat.js";
 
 export function registerRoutes(
@@ -25,6 +27,8 @@ export function registerRoutes(
   registerToolRoutes(fastify, deps, apiPrefix);
   registerApprovalRoutes(fastify, deps, events, apiPrefix);
   registerLogRoutes(fastify, deps, apiPrefix);
+  registerMCPRoutes(fastify, deps, apiPrefix);
+  registerSkillRoutes(fastify, deps, apiPrefix);
 
   registerOpenAICompatRoutes(fastify, deps, events);
 }

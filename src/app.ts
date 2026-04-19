@@ -17,6 +17,9 @@ import { ToolRegistry, ToolPolicyPipeline, registerAllTools, auditLog } from "./
 import { ApprovalSystem } from "./security/approval.js";
 import { VMSandbox } from "./security/sandbox.js";
 import { Gateway } from "./gateway/index.js";
+import { MCPClientManager } from "./mcp/manager.js";
+import { MCPConfigWatcher } from "./mcp/watcher.js";
+import { SkillManager } from "./skills/manager.js";
 import { logger } from "./utils/logger.js";
 
 export class LotteApp {
@@ -35,6 +38,9 @@ export class LotteApp {
   private approvalSystem: ApprovalSystem | null = null;
   private sandbox: VMSandbox | null = null;
   private gateway: Gateway | null = null;
+  private mcpManager: MCPClientManager | null = null;
+  private mcpWatcher: MCPConfigWatcher | null = null;
+  private skillManager: SkillManager | null = null;
   private sessions: Map<string, Session> = new Map();
   private running = false;
 
@@ -100,6 +106,27 @@ export class LotteApp {
 
     this.sandbox = new VMSandbox();
 
+    this.mcpManager = new MCPClientManager();
+    const mcpConfig = this.config.getMCP();
+    try {
+      await this.mcpManager.initFromConfig(mcpConfig);
+    } catch (error) {
+      logger.warn(`MCP initialization error: ${error}`);
+    }
+
+    this.mcpWatcher = new MCPConfigWatcher(
+      this.mcpManager,
+      () => this.config?.getMCP() ?? null,
+      { pollInterval: 3000 },
+    );
+    this.mcpWatcher.start();
+
+    this.skillManager = new SkillManager({
+      dataDir: this.config.getPaths().dataDir,
+      configDir: this.config.getPaths().configDir,
+    });
+    this.skillManager.initialize();
+
     const gatewayConfig = this.config.getGateway();
     this.gateway = new Gateway({ app: this, config: gatewayConfig });
     await this.gateway.start();
@@ -136,6 +163,21 @@ export class LotteApp {
     if (this.gateway) {
       await this.gateway.stop();
       this.gateway = null;
+    }
+
+    if (this.mcpWatcher) {
+      this.mcpWatcher.stop();
+      this.mcpWatcher = null;
+    }
+
+    if (this.mcpManager) {
+      await this.mcpManager.closeAll();
+      this.mcpManager = null;
+    }
+
+    if (this.skillManager) {
+      this.skillManager.shutdown();
+      this.skillManager = null;
     }
 
     if (this.configWatcher) {
@@ -224,6 +266,14 @@ export class LotteApp {
   getGateway(): Gateway {
     if (!this.gateway) throw new Error("Gateway not started");
     return this.gateway;
+  }
+
+  getMCPManager(): MCPClientManager | null {
+    return this.mcpManager;
+  }
+
+  getSkillManager(): SkillManager | null {
+    return this.skillManager;
   }
 
   createSession(options?: { model?: string; maxTurns?: number }): Session {
