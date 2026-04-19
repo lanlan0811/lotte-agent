@@ -5,7 +5,6 @@ import type {
   ChannelType,
   ProcessHandler,
   OnReplySent,
-  MessageContent,
 } from "../types.js";
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
@@ -88,7 +87,7 @@ export class ConsoleChannel extends BaseChannel {
     }
   }
 
-  async sendText(toHandle: string, text: string, _meta?: Record<string, unknown>): Promise<void> {
+  async sendText(_toHandle: string, text: string, _meta?: Record<string, unknown>): Promise<void> {
     console.log(`\n${text}\n`);
     if (this.rl) {
       this.rl.prompt();

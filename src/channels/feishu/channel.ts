@@ -1,6 +1,5 @@
 import { BaseChannel } from "../base.js";
 import type {
-  ChannelMessage,
   ChannelResponse,
   ChannelType,
   ProcessHandler,
@@ -108,7 +107,8 @@ export class FeishuChannel extends BaseChannel {
     if (!response.ok) throw new Error(`Get WS endpoint failed: ${response.status}`);
 
     const data = (await response.json()) as Record<string, unknown>;
-    const endpoint = data.data?.endpoint as string;
+    const dataInner = data.data as Record<string, unknown> | undefined;
+    const endpoint = dataInner?.endpoint as string | undefined;
     if (!endpoint) throw new Error("No WebSocket endpoint in response");
 
     this.ws = new WebSocket(endpoint);

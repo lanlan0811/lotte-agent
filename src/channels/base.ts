@@ -8,7 +8,6 @@ import type {
   OnReplySent,
   EnqueueCallback,
   MessageContent,
-  TextContent,
 } from "./types.js";
 
 export abstract class BaseChannel {
@@ -63,7 +62,7 @@ export abstract class BaseChannel {
     };
   }
 
-  resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
+  resolveSessionId(senderId: string, _meta?: Record<string, unknown>): string {
     return `${this.channelType}:${senderId}`;
   }
 
@@ -113,7 +112,7 @@ export abstract class BaseChannel {
 
       if (this.botPrefix && payload.content.length > 0) {
         const first = payload.content[0];
-        if (first.type === "text" && first.text.trim().startsWith(this.botPrefix)) {
+        if (first && first.type === "text" && "text" in first && first.text.trim().startsWith(this.botPrefix)) {
           first.text = first.text.trim().slice(this.botPrefix.length).trim();
         }
       }
