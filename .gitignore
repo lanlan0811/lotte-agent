@@ -42,7 +42,7 @@ Web/.next/
 data/
 
 # Config directory - contains API keys
-config/
+~/.lotte/config/
 
 # Error dumps
 dumps/
