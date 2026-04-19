@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import crypto from "node:crypto";
 import type { GatewayConfig } from "../config/schema.js";
 import type { LotteApp } from "../app.js";
+import type { PluginRegistry, PluginLoader } from "../plugins/index.js";
 import { logger } from "../utils/logger.js";
 import { registerAuthMiddleware, type AuthResult } from "./auth.js";
 import { registerRoutes } from "./routes/index.js";
@@ -12,6 +13,8 @@ import { EventEmitter } from "./events.js";
 export interface GatewayDeps {
   app: LotteApp;
   config: GatewayConfig;
+  pluginRegistry?: PluginRegistry;
+  pluginLoader?: PluginLoader;
 }
 
 export interface GatewayContext {

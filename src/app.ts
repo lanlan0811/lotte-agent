@@ -20,6 +20,13 @@ import { Gateway } from "./gateway/index.js";
 import { MCPClientManager } from "./mcp/manager.js";
 import { MCPConfigWatcher } from "./mcp/watcher.js";
 import { SkillManager } from "./skills/manager.js";
+import { PluginRegistry, PluginLoader } from "./plugins/index.js";
+import { ChannelManager } from "./channels/manager.js";
+import { ConsoleChannel } from "./channels/console/channel.js";
+import { WeixinChannel } from "./channels/weixin/channel.js";
+import { QQChannel } from "./channels/qq/channel.js";
+import { FeishuChannel } from "./channels/feishu/channel.js";
+import { AutomationManager } from "./automation/manager.js";
 import { logger } from "./utils/logger.js";
 
 export class LotteApp {
@@ -41,6 +48,10 @@ export class LotteApp {
   private mcpManager: MCPClientManager | null = null;
   private mcpWatcher: MCPConfigWatcher | null = null;
   private skillManager: SkillManager | null = null;
+  private pluginRegistry: PluginRegistry | null = null;
+  private pluginLoader: PluginLoader | null = null;
+  private channelManager: ChannelManager | null = null;
+  private automationManager: AutomationManager | null = null;
   private sessions: Map<string, Session> = new Map();
   private running = false;
 
@@ -127,8 +138,132 @@ export class LotteApp {
     });
     this.skillManager.initialize();
 
+    this.pluginRegistry = new PluginRegistry();
+    this.pluginLoader = new PluginLoader(this.config.getPaths().dataDir + "/plugins");
+
+    const discoveredPlugins = this.pluginLoader.discoverPlugins();
+    for (const manifest of discoveredPlugins) {
+      try {
+        const plugin = await this.pluginLoader.loadPlugin(manifest);
+        this.pluginRegistry.register(manifest.name, plugin);
+        logger.info(`Discovered plugin: ${manifest.name} v${manifest.version}`);
+      } catch (error) {
+        logger.warn(`Failed to load plugin '${manifest.name}': ${error}`);
+      }
+    }
+
+    this.channelManager = new ChannelManager(
+      async (message) => {
+        try {
+          const result = await this.chat(message.sessionId, this.extractTextFromMessage(message));
+          if (result) {
+            const { ChannelResponse } = await import("./channels/types.js");
+            return {
+              toHandle: message.sessionId,
+              content: [{ type: "text" as const, text: result.response ?? "" }],
+            };
+          }
+          return null;
+        } catch (error) {
+          logger.error(`Channel process error: ${error}`);
+          return {
+            toHandle: message.sessionId,
+            content: [{ type: "text" as const, text: "Sorry, an error occurred while processing your message." }],
+          };
+        }
+      },
+    );
+
+    const consoleChannel = new ConsoleChannel(async (msg) => {
+      try {
+        const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
+        if (result) {
+          return {
+            toHandle: msg.sessionId,
+            content: [{ type: "text" as const, text: result.response ?? "" }],
+          };
+        }
+        return null;
+      } catch (error) {
+        logger.error(`Console channel process error: ${error}`);
+        return {
+          toHandle: msg.sessionId,
+          content: [{ type: "text" as const, text: "Sorry, an error occurred." }],
+        };
+      }
+    });
+    this.channelManager.register(consoleChannel);
+
+    const channelsConfig = this.config.getChannels();
+
+    if (channelsConfig.weixin.enabled) {
+      const weixinChannel = new WeixinChannel(
+        async (msg) => {
+          try {
+            const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
+            return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
+          } catch { return null; }
+        },
+        channelsConfig.weixin,
+      );
+      this.channelManager.register(weixinChannel);
+    }
+
+    if (channelsConfig.qq.enabled) {
+      const qqChannel = new QQChannel(
+        async (msg) => {
+          try {
+            const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
+            return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
+          } catch { return null; }
+        },
+        channelsConfig.qq,
+      );
+      this.channelManager.register(qqChannel);
+    }
+
+    if (channelsConfig.feishu.enabled) {
+      const feishuChannel = new FeishuChannel(
+        async (msg) => {
+          try {
+            const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
+            return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
+          } catch { return null; }
+        },
+        channelsConfig.feishu,
+      );
+      this.channelManager.register(feishuChannel);
+    }
+
+    await this.channelManager.startAll();
+
+    this.automationManager = new AutomationManager({
+      chat: async (sessionId, text) => {
+        try {
+          return await this.chat(sessionId, text);
+        } catch (error) {
+          logger.error(`Automation chat error: ${error}`);
+          return null;
+        }
+      },
+      sendChannelMessage: async (channelId, toHandle, text) => {
+        try {
+          await this.channelManager?.sendCrossChannel(channelId, toHandle, text);
+        } catch (error) {
+          logger.error(`Automation channel send error: ${error}`);
+        }
+      },
+    });
+
+    await this.automationManager.start();
+
     const gatewayConfig = this.config.getGateway();
-    this.gateway = new Gateway({ app: this, config: gatewayConfig });
+    this.gateway = new Gateway({
+      app: this,
+      config: gatewayConfig,
+      pluginRegistry: this.pluginRegistry,
+      pluginLoader: this.pluginLoader,
+    });
     await this.gateway.start();
 
     this.configWatcher = new ConfigWatcher(this.config);
@@ -178,6 +313,23 @@ export class LotteApp {
     if (this.skillManager) {
       this.skillManager.shutdown();
       this.skillManager = null;
+    }
+
+    if (this.pluginRegistry) {
+      await this.pluginRegistry.deactivateAll();
+      this.pluginRegistry = null;
+    }
+
+    this.pluginLoader = null;
+
+    if (this.channelManager) {
+      await this.channelManager.stopAll();
+      this.channelManager = null;
+    }
+
+    if (this.automationManager) {
+      await this.automationManager.stop();
+      this.automationManager = null;
     }
 
     if (this.configWatcher) {
@@ -274,6 +426,30 @@ export class LotteApp {
 
   getSkillManager(): SkillManager | null {
     return this.skillManager;
+  }
+
+  getPluginRegistry(): PluginRegistry | null {
+    return this.pluginRegistry;
+  }
+
+  getPluginLoader(): PluginLoader | null {
+    return this.pluginLoader;
+  }
+
+  getChannelManager(): ChannelManager | null {
+    return this.channelManager;
+  }
+
+  getAutomationManager(): AutomationManager | null {
+    return this.automationManager;
+  }
+
+  private extractTextFromMessage(message: import("./channels/types.js").ChannelMessage): string {
+    const texts: string[] = [];
+    for (const c of message.content) {
+      if (c.type === "text") texts.push(c.text);
+    }
+    return texts.join("\n");
   }
 
   createSession(options?: { model?: string; maxTurns?: number }): Session {

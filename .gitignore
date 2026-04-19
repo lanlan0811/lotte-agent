@@ -46,3 +46,6 @@ config/
 
 # Error dumps
 dumps/
+
+#test
+.lotte-test/
