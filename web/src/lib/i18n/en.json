@@ -43,7 +43,8 @@
     "automation": "Automation",
     "logs": "Logs",
     "config": "Settings",
-    "rag": "RAG"
+    "rag": "RAG",
+    "notification": "Notifications"
   },
   "chat": {
     "title": "Chat",
@@ -129,5 +130,38 @@
     "apiUrl": "API URL",
     "model": "Model",
     "provider": "Provider"
+  },
+  "rag": {
+    "title": "RAG Knowledge Base",
+    "upload": "Upload Documents",
+    "documents": "Documents",
+    "search": "Search Knowledge Base",
+    "stats": "Statistics",
+    "documentCount": "Documents",
+    "chunkCount": "Chunks",
+    "dragDrop": "Drag & drop files here",
+    "supportedFormats": "Supports PDF, TXT, MD, JSON, CSV",
+    "browseFiles": "Browse Files",
+    "searchPlaceholder": "Enter query...",
+    "results": "Results",
+    "score": "Score",
+    "noResults": "No results found",
+    "deleteConfirm": "Are you sure you want to delete this document?",
+    "uploadSuccess": "Document uploaded successfully",
+    "uploadError": "Document upload failed"
+  },
+  "notification": {
+    "title": "Notifications",
+    "message": "Message Channel",
+    "webhook": "Webhook",
+    "email": "Email",
+    "rules": "Notification Rules",
+    "addRule": "Add Rule",
+    "eventType": "Event Type",
+    "channels": "Channels",
+    "enabled": "Enabled",
+    "test": "Test",
+    "testSuccess": "Test notification sent successfully",
+    "testFailed": "Test notification failed"
   }
 }

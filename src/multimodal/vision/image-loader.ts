@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { VisionConfig, ImageContent } from "./types.js";
-import { logger } from "../utils/logger.js";
+import type { VisionConfig, ImageContent } from "../types.js";
+import { logger } from "../../utils/logger.js";
 
 export class ImageLoader {
   private config: VisionConfig;

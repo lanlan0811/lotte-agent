@@ -1,6 +1,5 @@
 import { BaseChannel } from "../base.js";
 import type {
-  ChannelMessage,
   ChannelResponse,
   ChannelType,
   ProcessHandler,
@@ -39,7 +38,7 @@ export class QQChannel extends BaseChannel {
   private ws: WebSocket | null = null;
   private heartbeatInterval = 41250;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private sessionId: string | null = null;
+  private _sessionId: string | null = null;
   private seq: number | null = null;
   private reconnectAttempts = 0;
   private renderer: MessageRenderer;
@@ -55,7 +54,7 @@ export class QQChannel extends BaseChannel {
     });
   }
 
-  resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
+  override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
     const groupId = meta?.qq_group_id as string | undefined;
     if (groupId) return `qq:group:${groupId}`;
     return senderId ? `qq:${senderId}` : "qq:unknown";
@@ -166,7 +165,7 @@ export class QQChannel extends BaseChannel {
       const d = data.d as Record<string, unknown>;
 
       if (t === "READY") {
-        this.sessionId = d.session_id as string;
+        this._sessionId = d.session_id as string;
         this.reconnectAttempts = 0;
         logger.info("QQ Bot session ready");
       } else if (t === "RESUMED") {
@@ -227,7 +226,7 @@ export class QQChannel extends BaseChannel {
       return;
     }
 
-    const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempts, RECONNECT_DELAYS.length - 1)];
+    const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempts, RECONNECT_DELAYS.length - 1)]!;
     this.reconnectAttempts++;
     logger.info(`QQ Bot reconnecting in ${delay}s (attempt ${this.reconnectAttempts})`);
 
@@ -250,7 +249,7 @@ export class QQChannel extends BaseChannel {
       const iter = this.processedIds.values();
       for (let i = 0; i < 1000; i++) {
         iter.next();
-        this.processedIds.delete(iter.next().value);
+        this.processedIds.delete(iter.next().value!);
       }
     }
 

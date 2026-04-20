@@ -10,7 +10,7 @@ import { logger } from "../utils/logger.js";
 
 export class MultimodalManager {
   private config: MultimodalConfig;
-  private modelManager: ModelManager;
+  private _modelManager: ModelManager;
   private visionRunner: VisionRunner;
   private imageLoader: ImageLoader;
   private videoRunner: VideoRunner;
@@ -21,7 +21,7 @@ export class MultimodalManager {
 
   constructor(config: MultimodalConfig, modelManager: ModelManager, dataDir: string) {
     this.config = config;
-    this.modelManager = modelManager;
+    this._modelManager = modelManager;
 
     this.visionRunner = new VisionRunner(config.vision, modelManager);
     this.imageLoader = new ImageLoader(config.vision);

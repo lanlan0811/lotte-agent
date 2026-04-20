@@ -94,7 +94,7 @@ export class SpeechToText {
         timestamp_granularities: ["segment"],
       });
 
-      const result = transcription as Record<string, unknown>;
+      const result = transcription as unknown as Record<string, unknown>;
 
       return {
         text: (result.text as string) ?? "",

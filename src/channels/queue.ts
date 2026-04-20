@@ -94,7 +94,6 @@ export class UnifiedQueueManager {
   }
 
   private _createAsyncIterable(state: QueueState): AsyncIterable<unknown> {
-    const self = this;
     return {
       [Symbol.asyncIterator]() {
         return {
@@ -124,6 +123,7 @@ export class UnifiedQueueManager {
   startCleanupLoop(): void {
     if (this._cleanupTimer) return;
     this._running = true;
+    void this._running;
     this._cleanupTimer = setInterval(() => this._cleanupIdleQueues(), this._cleanupInterval);
     logger.info("Queue cleanup loop started");
   }

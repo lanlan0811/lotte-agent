@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import type { RAGConfig } from "../config/schema.js";
 import type { AIConfig } from "../config/schema.js";
 import type { RAGDocument, RAGChunk, RAGSearchResult } from "./types.js";
@@ -15,8 +14,8 @@ import { logger } from "../utils/logger.js";
 import type { Database } from "../db/database.js";
 
 export class RAGManager {
-  private config: RAGConfig;
-  private aiConfig: AIConfig;
+  private _config: RAGConfig;
+  private _aiConfig: AIConfig;
   private store: VectorStore;
   private loader: DocumentLoader;
   private chunker: DocumentChunker;
@@ -26,14 +25,14 @@ export class RAGManager {
   private initialized = false;
 
   constructor(config: RAGConfig, aiConfig: AIConfig, database: Database, dataDir: string) {
-    this.config = config;
-    this.aiConfig = aiConfig;
+    this._config = config;
+    this._aiConfig = aiConfig;
     this.ragDir = path.join(dataDir, "rag");
     this.store = new VectorStore(database.getDb());
     this.loader = new DocumentLoader();
     this.chunker = new DocumentChunker(config.chunk);
 
-    this.embeddingProvider = createEmbeddingProvider(config.embedding, aiConfig.providers);
+    this.embeddingProvider = createEmbeddingProvider(config.embedding, { providers: aiConfig.providers });
     this.retriever = new Retriever(this.store, this.embeddingProvider, config.retrieval);
   }
 
@@ -83,7 +82,7 @@ export class RAGManager {
       chunk_id: VectorStore.generateId(),
       doc_id: docId,
       text: chunk.text,
-      embedding: embeddings[i],
+      embedding: embeddings[i] ?? [],
       start_offset: chunk.start_offset,
       end_offset: chunk.end_offset,
       metadata_json: null,

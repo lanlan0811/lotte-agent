@@ -14,6 +14,8 @@ export class ChannelManager {
   constructor(process: ProcessHandler, onReplySent: OnReplySent = null) {
     this._process = process;
     this._onReplySent = onReplySent;
+    void this._process;
+    void this._onReplySent;
   }
 
   register(channel: BaseChannel): void {

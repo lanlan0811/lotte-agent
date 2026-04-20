@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
 
@@ -50,46 +49,25 @@ export function registerRAGRoutes(
         return;
       }
 
-      const data = await request.file();
-      if (!data) {
-        const body = request.body as { file_path?: string } | undefined;
-        if (!body?.file_path) {
-          reply.status(400).send({
-            ok: false,
-            error: { code: "VALIDATION_ERROR", message: "No file provided. Send multipart file or file_path in body.", details: null },
-          });
-          return;
-        }
-
-        if (!fs.existsSync(body.file_path)) {
-          reply.status(400).send({
-            ok: false,
-            error: { code: "FILE_NOT_FOUND", message: `File not found: ${body.file_path}`, details: null },
-          });
-          return;
-        }
-
-        const document = await ragManager.uploadDocument(body.file_path);
-        reply.status(201).send({ ok: true, data: { document } });
+      const body = request.body as { file_path?: string } | undefined;
+      if (!body?.file_path) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: "VALIDATION_ERROR", message: "No file_path provided in body.", details: null },
+        });
         return;
       }
 
-      const buffer = await data.toBuffer();
-      const tmpDir = path.join(deps.app.getConfig().getPaths().dataDir, "rag", "tmp");
-      fs.mkdirSync(tmpDir, { recursive: true });
-      const tmpPath = path.join(tmpDir, data.filename);
-      fs.writeFileSync(tmpPath, buffer);
-
-      try {
-        const document = await ragManager.uploadDocument(tmpPath);
-        reply.status(201).send({ ok: true, data: { document } });
-      } finally {
-        try {
-          fs.unlinkSync(tmpPath);
-        } catch {
-          // ignore cleanup errors
-        }
+      if (!fs.existsSync(body.file_path)) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: "FILE_NOT_FOUND", message: `File not found: ${body.file_path}`, details: null },
+        });
+        return;
       }
+
+      const document = await ragManager.uploadDocument(body.file_path);
+      reply.status(201).send({ ok: true, data: { document } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       reply.status(500).send({

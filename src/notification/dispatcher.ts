@@ -6,11 +6,38 @@ import { WebhookNotifier } from "./webhook.js";
 import { EmailNotifier } from "./email.js";
 import { logger } from "../utils/logger.js";
 
+export interface ManagedNotificationRule {
+  id: string;
+  name: string;
+  eventTypes: string[];
+  channels: Array<{ type: "message" | "webhook" | "email"; target: string }>;
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface WebhookConfigView {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface EmailConfigView {
+  smtp_host: string;
+  smtp_port: number;
+  from: string;
+  to: string[];
+  enabled: boolean;
+}
+
 export class NotificationDispatcher {
   private rules: NotificationRule[];
+  private managedRules: ManagedNotificationRule[] = [];
   private messageNotifier: MessageNotifier;
   private webhookNotifier: WebhookNotifier;
   private emailNotifier: EmailNotifier;
+  private webhookConfigView: WebhookConfigView;
+  private emailConfigView: EmailConfigView;
 
   constructor(config: NotificationConfig, channelManager: ChannelManager | null) {
     this.rules = [];
@@ -34,13 +61,28 @@ export class NotificationDispatcher {
       password: config.email.password,
       recipients: config.email.recipients,
     });
+
+    this.webhookConfigView = {
+      url: config.webhook.url,
+      method: "POST",
+      headers: config.webhook.headers,
+      enabled: config.webhook.enabled,
+    };
+
+    this.emailConfigView = {
+      smtp_host: config.email.smtp_host,
+      smtp_port: config.email.smtp_port,
+      from: config.email.sender,
+      to: config.email.recipients,
+      enabled: config.email.enabled,
+    };
   }
 
-  addRule(rule: NotificationRule): void {
+  addLegacyRule(rule: NotificationRule): void {
     this.rules.push(rule);
   }
 
-  removeRule(eventType: string): void {
+  removeLegacyRule(eventType: string): void {
     this.rules = this.rules.filter((r) => r.event_type !== eventType);
   }
 
@@ -100,5 +142,82 @@ export class NotificationDispatcher {
     return this.rules.filter(
       (rule) => rule.event_type === eventType || rule.event_type === "*",
     );
+  }
+
+  getRules(): ManagedNotificationRule[] {
+    return this.managedRules;
+  }
+
+  addManagedRule(input: Omit<ManagedNotificationRule, "id" | "createdAt">): ManagedNotificationRule {
+    const rule: ManagedNotificationRule = {
+      id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: input.name,
+      eventTypes: input.eventTypes,
+      channels: input.channels,
+      enabled: input.enabled,
+      createdAt: Date.now(),
+    };
+    this.managedRules.push(rule);
+    return rule;
+  }
+
+  updateRule(ruleId: string, updates: { enabled?: boolean; name?: string; eventTypes?: string[] }): ManagedNotificationRule | null {
+    const idx = this.managedRules.findIndex((r) => r.id === ruleId);
+    if (idx === -1) return null;
+    const existing = this.managedRules[idx]!;
+    this.managedRules[idx] = {
+      id: existing.id,
+      name: updates.name ?? existing.name,
+      eventTypes: updates.eventTypes ?? existing.eventTypes,
+      channels: existing.channels,
+      enabled: updates.enabled ?? existing.enabled,
+      createdAt: existing.createdAt,
+    };
+    return this.managedRules[idx];
+  }
+
+  removeRule(ruleId: string): boolean {
+    const len = this.managedRules.length;
+    this.managedRules = this.managedRules.filter((r) => r.id !== ruleId);
+    return this.managedRules.length < len;
+  }
+
+  getWebhookConfig(): WebhookConfigView {
+    return this.webhookConfigView;
+  }
+
+  getEmailConfig(): EmailConfigView {
+    return this.emailConfigView;
+  }
+
+  updateWebhookConfig(updates: Partial<WebhookConfigView>): void {
+    this.webhookConfigView = { ...this.webhookConfigView, ...updates };
+  }
+
+  updateEmailConfig(updates: Partial<EmailConfigView>): void {
+    this.emailConfigView = { ...this.emailConfigView, ...updates };
+  }
+
+  async testChannel(channel: string): Promise<void> {
+    const testEvent: NotificationEvent = {
+      type: "custom",
+      title: "Test Notification",
+      message: "This is a test notification from Lotte Agent.",
+      timestamp: Date.now(),
+    };
+
+    switch (channel) {
+      case "webhook":
+        await this.webhookNotifier.send(testEvent);
+        break;
+      case "email":
+        await this.emailNotifier.send(testEvent);
+        break;
+      case "message":
+        await this.messageNotifier.send(testEvent);
+        break;
+      default:
+        throw new Error(`Unknown channel: ${channel}`);
+    }
   }
 }

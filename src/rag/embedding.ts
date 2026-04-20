@@ -22,8 +22,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.id = config.provider;
     this.model = config.model;
     this.client = new OpenAI({
-      apiKey: apiKey || undefined,
-      baseURL: apiUrl || undefined,
+      apiKey: apiKey ?? undefined,
+      baseURL: apiUrl ?? undefined,
     });
   }
 
@@ -33,7 +33,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     if (cached) return cached;
 
     const embeddings = await this.embedBatch([text]);
-    return embeddings[0];
+    return embeddings[0] ?? [];
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {
@@ -42,12 +42,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     const uncachedIndices: number[] = [];
 
     for (let i = 0; i < texts.length; i++) {
-      const cacheKey = this.getCacheKey(texts[i]);
+      const text = texts[i]!;
+      const cacheKey = this.getCacheKey(text);
       const cached = this.cache.get(cacheKey);
       if (cached) {
         results[i] = cached;
       } else {
-        uncachedTexts.push(texts[i]);
+        uncachedTexts.push(text);
         uncachedIndices.push(i);
       }
     }
@@ -63,11 +64,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
           });
 
           for (let j = 0; j < response.data.length; j++) {
-            const embedding = sanitizeAndNormalizeEmbedding(response.data[j].embedding);
-            const originalIndex = uncachedIndices[i + j];
+            const dataItem = response.data[j]!;
+            const embedding = sanitizeAndNormalizeEmbedding(dataItem.embedding);
+            const originalIndex = uncachedIndices[i + j]!;
             results[originalIndex] = embedding;
 
-            const cacheKey = this.getCacheKey(batch[j]);
+            const cacheKey = this.getCacheKey(batch[j]!);
             this.cache.set(cacheKey, embedding);
           }
         } catch (error) {
@@ -105,7 +107,7 @@ export class CustomEmbeddingProvider implements EmbeddingProvider {
     if (cached) return cached;
 
     const embeddings = await this.embedBatch([text]);
-    return embeddings[0];
+    return embeddings[0] ?? [];
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {

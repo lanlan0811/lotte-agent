@@ -1,5 +1,5 @@
 import type { SkillManager } from "./manager.js";
-import { SkillHubClient, SkillConflictError, suggestConflictName } from "./hub.js";
+import { SkillHubClient, SkillConflictError } from "./hub.js";
 import { SkillScanner } from "./scanner.js";
 import { getBuiltinSkillByName } from "./builtins.js";
 import type { SkillManifest, SkillInstallResult, ScanResult } from "./types.js";

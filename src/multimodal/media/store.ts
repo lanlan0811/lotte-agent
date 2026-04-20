@@ -204,7 +204,7 @@ export class MediaServer {
       return;
     }
 
-    const id = match[1];
+    const id = match[1]!;
     const data = this.store.get(id);
     const metadata = this.store.getMetadata(id);
 

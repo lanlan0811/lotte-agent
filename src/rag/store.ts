@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import type BetterSqlite3 from "better-sqlite3";
 import type { RAGDocument, RAGChunk, RAGSearchResult } from "./types.js";
-import { logger } from "../utils/logger.js";
 
 export class VectorStore {
   private db: BetterSqlite3.Database;
@@ -160,9 +159,11 @@ export class VectorStore {
     let normB = 0;
 
     for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
+      const aVal = a[i]!;
+      const bVal = b[i]!;
+      dotProduct += aVal * bVal;
+      normA += aVal * aVal;
+      normB += bVal * bVal;
     }
 
     const denominator = Math.sqrt(normA) * Math.sqrt(normB);

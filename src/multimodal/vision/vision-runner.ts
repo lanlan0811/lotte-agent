@@ -1,5 +1,5 @@
 import type { ModelManager } from "../../ai/model-manager.js";
-import type { ChatMessage, ToolDefinition } from "../../ai/types.js";
+import type { ChatMessage } from "../../ai/types.js";
 import type { VisionConfig, ImageContent } from "../types.js";
 import { ImageLoader } from "./image-loader.js";
 import { logger } from "../../utils/logger.js";
@@ -24,17 +24,13 @@ export class VisionRunner {
       throw new Error("Vision is not enabled");
     }
 
-    let imageContent: ImageContent;
-    if (Buffer.isBuffer(imageSource)) {
-      imageContent = await this.imageLoader.loadFromBuffer(
-        imageSource,
-        options?.mimeType ?? "image/png",
-      );
-    } else if (imageSource.startsWith("http") || imageSource.startsWith("data:")) {
-      imageContent = await this.imageLoader.loadFromUrl(imageSource);
-    } else {
-      imageContent = await this.imageLoader.loadFromFile(imageSource);
-    }
+    const imageContent: ImageContent = Buffer.isBuffer(imageSource)
+      ? await this.imageLoader.loadFromBuffer(imageSource, options?.mimeType ?? "image/png")
+      : imageSource.startsWith("http") || imageSource.startsWith("data:")
+        ? await this.imageLoader.loadFromUrl(imageSource)
+        : await this.imageLoader.loadFromFile(imageSource);
+
+    void imageContent;
 
     const model = options?.model ?? this.modelManager.getDefaultModel();
 
@@ -49,7 +45,6 @@ export class VisionRunner {
       const response = await this.modelManager.chat({
         model,
         messages,
-        tools: this.buildVisionTools(imageContent),
       });
 
       const content = response.choices[0]?.message?.content;
@@ -58,10 +53,6 @@ export class VisionRunner {
       logger.error(`Vision analysis error: ${error}`);
       throw error;
     }
-  }
-
-  private buildVisionTools(imageContent: ImageContent): ToolDefinition[] | undefined {
-    return undefined;
   }
 
   buildMultimodalMessage(prompt: string, images: ImageContent[]): ChatMessage {

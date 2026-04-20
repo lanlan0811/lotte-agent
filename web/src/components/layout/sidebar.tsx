@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
@@ -36,6 +37,7 @@ const navItems = [
   { id: "logs", icon: ScrollText, labelKey: "nav.logs" },
   { id: "config", icon: Settings, labelKey: "nav.config" },
   { id: "rag", icon: Database, labelKey: "nav.rag" },
+  { id: "notification", icon: Bell, labelKey: "nav.notification" },
 ];
 
 export function AppSidebar() {

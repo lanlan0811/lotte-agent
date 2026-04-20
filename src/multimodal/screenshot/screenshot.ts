@@ -1,9 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import type { ScreenshotConfig, ScreenshotResult } from "../types.js";
+import type { ScreenshotResult } from "../types.js";
 import { logger } from "../../utils/logger.js";
-
-const execFileAsync = promisify(execFile);
 
 export class BrowserScreenshot {
   async capture(url: string, options?: { width?: number; height?: number }): Promise<ScreenshotResult> {
@@ -44,9 +40,10 @@ export class ScreenScreenshot {
     }
 
     try {
-      const screenshot = await import("screenshot-desktop");
-      const result = await screenshot.default({ format: "png" });
-      const buffer = Buffer.isBuffer(result) ? result : Buffer.from(result as ArrayBuffer);
+      const screenshot = await import("screenshot-desktop" as string);
+      const mod = screenshot as { default: (opts: { format: string }) => Promise<Buffer | ArrayBuffer> };
+      const result = await mod.default({ format: "png" });
+      const buffer = Buffer.isBuffer(result) ? result : Buffer.from(result);
 
       return {
         data: buffer,

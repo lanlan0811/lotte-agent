@@ -11,6 +11,7 @@ import { AutomationView } from "@/components/views/automation-view";
 import { LogsView } from "@/components/views/logs-view";
 import { ConfigView } from "@/components/views/config-view";
 import { RAGView } from "@/components/views/rag-view";
+import { NotificationView } from "@/components/views/notification-view";
 
 const viewMap: Record<string, React.ComponentType> = {
   chat: ChatView,
@@ -22,6 +23,7 @@ const viewMap: Record<string, React.ComponentType> = {
   logs: LogsView,
   config: ConfigView,
   rag: RAGView,
+  notification: NotificationView,
 };
 
 export function MainContent() {

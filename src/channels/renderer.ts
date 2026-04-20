@@ -1,4 +1,4 @@
-import type { MessageContent, TextContent, ImageContent, VideoContent, AudioContent, FileContent } from "./types.js";
+import type { MessageContent, ImageContent, VideoContent, AudioContent, FileContent } from "./types.js";
 
 export interface RenderStyle {
   showToolDetails: boolean;

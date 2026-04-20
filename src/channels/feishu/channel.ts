@@ -45,7 +45,7 @@ export class FeishuChannel extends BaseChannel {
     });
   }
 
-  resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
+  override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
     const chatId = meta?.feishu_chat_id as string | undefined;
     if (chatId) return `feishu:chat:${chatId}`;
     return senderId ? `feishu:${senderId}` : "feishu:unknown";
@@ -177,7 +177,7 @@ export class FeishuChannel extends BaseChannel {
       const iter = this.processedIds.values();
       for (let i = 0; i < FEISHU_PROCESSED_IDS_MAX / 2; i++) {
         iter.next();
-        this.processedIds.delete(iter.next().value);
+        this.processedIds.delete(iter.next().value!);
       }
     }
 

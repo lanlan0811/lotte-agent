@@ -106,7 +106,7 @@ export class DocumentLoader {
       };
     }
 
-    const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+    const headers = lines[0]!.split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
     const rows = lines.slice(1).filter((line) => line.trim());
     const formattedRows = rows.map((row) => {
       const values = row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
@@ -139,7 +139,7 @@ export class DocumentLoader {
         const page = await doc.getPage(i);
         const textContent = await page.getTextContent();
         const pageText = textContent.items
-          .map((item: { str?: string }) => item.str ?? "")
+          .map((item) => ("str" in item ? (item as { str: string }).str : ""))
           .join(" ");
         pages.push(pageText);
       }

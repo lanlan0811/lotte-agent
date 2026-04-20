@@ -1,5 +1,4 @@
-import type { BaseChannel } from "./base.js";
-import type { ChannelType, ChannelInfo } from "./types.js";
+import { BaseChannel } from "./base.js";
 import { logger } from "../utils/logger.js";
 
 type ChannelConstructor = new (...args: unknown[]) => BaseChannel;

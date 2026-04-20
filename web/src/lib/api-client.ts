@@ -21,6 +21,10 @@ export class ApiClient {
     this.token = token;
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   private async request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
     try {
       const headers: Record<string, string> = {
