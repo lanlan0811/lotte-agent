@@ -117,9 +117,21 @@ export class QQChannel extends BaseChannel {
     const wsUrl = await this.getWebSocketUrl();
     this.ws = new WebSocket(wsUrl);
 
-    this.ws.onopen = () => {
-      logger.debug("QQ Bot WebSocket connected");
-    };
+    const connectionPromise = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("WebSocket connection timeout")), 15000);
+
+      this.ws!.onopen = () => {
+        clearTimeout(timeout);
+        logger.debug("QQ Bot WebSocket connected");
+        resolve();
+      };
+
+      this.ws!.onerror = (event) => {
+        clearTimeout(timeout);
+        logger.error(`QQ Bot WebSocket error: ${event}`);
+        reject(new Error(`WebSocket error: ${event}`));
+      };
+    });
 
     this.ws.onmessage = (event) => {
       try {
@@ -138,21 +150,7 @@ export class QQChannel extends BaseChannel {
       }
     };
 
-    this.ws.onerror = (event) => {
-      logger.error(`QQ Bot WebSocket error: ${event}`);
-    };
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("WebSocket connection timeout")), 15000);
-      this.ws!.onopen = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      this.ws!.onerror = (err) => {
-        clearTimeout(timeout);
-        reject(new Error(`WebSocket error: ${err}`));
-      };
-    });
+    await connectionPromise;
   }
 
   private handleWSMessage(data: Record<string, unknown>): void {

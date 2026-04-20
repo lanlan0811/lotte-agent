@@ -4,4 +4,5 @@ export { BaseProvider } from "./provider.js";
 export { OpenAIProvider } from "./openai-provider.js";
 export { AnthropicProvider } from "./anthropic-provider.js";
 export { CustomProvider } from "./custom-provider.js";
+export { GeminiProvider } from "./gemini-provider.js";
 export { ModelManager } from "./model-manager.js";

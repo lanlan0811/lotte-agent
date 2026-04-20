@@ -43,7 +43,8 @@
     "automation": "自动化",
     "logs": "日志",
     "config": "设置",
-    "rag": "RAG"
+    "rag": "RAG",
+    "notification": "通知"
   },
   "chat": {
     "title": "对话",
@@ -129,5 +130,38 @@
     "apiUrl": "API 地址",
     "model": "模型",
     "provider": "提供商"
+  },
+  "rag": {
+    "title": "RAG 知识库",
+    "upload": "上传文档",
+    "documents": "文档列表",
+    "search": "搜索知识库",
+    "stats": "统计",
+    "documentCount": "文档数",
+    "chunkCount": "分块数",
+    "dragDrop": "拖拽文件到此处",
+    "supportedFormats": "支持 PDF、TXT、MD、JSON、CSV",
+    "browseFiles": "浏览文件",
+    "searchPlaceholder": "输入查询内容...",
+    "results": "搜索结果",
+    "score": "相关度",
+    "noResults": "未找到相关内容",
+    "deleteConfirm": "确定要删除此文档吗？",
+    "uploadSuccess": "文档上传成功",
+    "uploadError": "文档上传失败"
+  },
+  "notification": {
+    "title": "通知管理",
+    "message": "消息通道",
+    "webhook": "Webhook",
+    "email": "邮件",
+    "rules": "通知规则",
+    "addRule": "添加规则",
+    "eventType": "事件类型",
+    "channels": "通知通道",
+    "enabled": "已启用",
+    "test": "测试通知",
+    "testSuccess": "测试通知发送成功",
+    "testFailed": "测试通知发送失败"
   }
 }

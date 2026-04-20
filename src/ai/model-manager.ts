@@ -9,6 +9,7 @@ import type { AIConfig } from "../config/schema.js";
 import { OpenAIProvider } from "./openai-provider.js";
 import { AnthropicProvider } from "./anthropic-provider.js";
 import { CustomProvider } from "./custom-provider.js";
+import { GeminiProvider } from "./gemini-provider.js";
 import { logger } from "../utils/logger.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128000;
@@ -56,6 +57,8 @@ export class ModelManager {
         return new OpenAIProvider(config);
       case "anthropic":
         return new AnthropicProvider(config);
+      case "gemini":
+        return new GeminiProvider(config);
       case "custom":
         return new CustomProvider(config);
       default:

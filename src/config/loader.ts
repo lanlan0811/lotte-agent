@@ -12,6 +12,7 @@ import {
   NotificationConfigSchema,
   RAGConfigSchema,
   MultimodalConfigSchema,
+  VoiceConfigSchema,
 } from "./schema.js";
 import type {
   LotteConfig,
@@ -25,6 +26,7 @@ import type {
   NotificationConfig,
   RAGConfig,
   MultimodalConfig,
+  VoiceConfig,
 } from "./schema.js";
 import {
   getMainConfigDefaults,
@@ -38,6 +40,7 @@ import {
   getNotificationConfigDefaults,
   getRAGConfigDefaults,
   getMultimodalConfigDefaults,
+  getVoiceConfigDefaults,
 } from "./defaults.js";
 import { type ConfigPaths, resolveAllPaths, ensureDirectories, setFilePermissions } from "./paths.js";
 import { logger } from "../utils/logger.js";
@@ -57,6 +60,7 @@ export class ConfigLoader {
   private notificationConfig: NotificationConfig | null = null;
   private ragConfig: RAGConfig | null = null;
   private multimodalConfig: MultimodalConfig | null = null;
+  private voiceConfig: VoiceConfig | null = null;
   private changeCallbacks: ConfigChangeCallback[] = [];
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
@@ -193,6 +197,17 @@ export class ConfigLoader {
     return this.multimodalConfig;
   }
 
+  getVoice(): VoiceConfig {
+    if (!this.voiceConfig) {
+      this.voiceConfig = this.loadConfigFile(
+        this.paths.voiceConfig,
+        VoiceConfigSchema,
+        getVoiceConfigDefaults(),
+      );
+    }
+    return this.voiceConfig;
+  }
+
   async saveMain(config: LotteConfig): Promise<void> {
     this.mainConfig = config;
     await this.saveConfigFile(this.paths.mainConfig, config);
@@ -259,6 +274,12 @@ export class ConfigLoader {
     this.notifyChange("multimodal");
   }
 
+  async saveVoice(config: VoiceConfig): Promise<void> {
+    this.voiceConfig = config;
+    await this.saveConfigFile(this.paths.voiceConfig, config);
+    this.notifyChange("voice");
+  }
+
   async saveModule(module: string, data: Record<string, unknown>): Promise<void> {
     switch (module) {
       case "main":
@@ -293,6 +314,9 @@ export class ConfigLoader {
         break;
       case "multimodal":
         await this.saveMultimodal({ ...this.getMultimodal(), ...data } as MultimodalConfig);
+        break;
+      case "voice":
+        await this.saveVoice({ ...this.getVoice(), ...data } as VoiceConfig);
         break;
       default:
         throw new Error(`Unknown config module: ${module}`);
@@ -338,6 +362,9 @@ export class ConfigLoader {
       case "multimodal":
         this.multimodalConfig = null;
         break;
+      case "voice":
+        this.voiceConfig = null;
+        break;
     }
     logger.info(`Config reloaded: ${configName}`);
   }
@@ -354,6 +381,7 @@ export class ConfigLoader {
     this.notificationConfig = null;
     this.ragConfig = null;
     this.multimodalConfig = null;
+    this.voiceConfig = null;
     logger.info("All configs reloaded");
   }
 

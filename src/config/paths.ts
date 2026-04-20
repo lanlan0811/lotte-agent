@@ -14,6 +14,7 @@ const AUTOMATION_CONFIG_FILENAME = "automation.json";
 const NOTIFICATION_CONFIG_FILENAME = "notification.json";
 const RAG_CONFIG_FILENAME = "rag.json";
 const MULTIMODAL_CONFIG_FILENAME = "multimodal.json";
+const VOICE_CONFIG_FILENAME = "voice.json";
 
 export function resolveStateDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.LOTTE_STATE_DIR?.trim();
@@ -64,6 +65,7 @@ export interface ConfigPaths {
   notificationConfig: string;
   ragConfig: string;
   multimodalConfig: string;
+  voiceConfig: string;
   soulDir: string;
   memoryDir: string;
   mediaDir: string;
@@ -92,6 +94,7 @@ export function resolveAllPaths(env: NodeJS.ProcessEnv = process.env): ConfigPat
     notificationConfig: path.join(configDir, NOTIFICATION_CONFIG_FILENAME),
     ragConfig: path.join(configDir, RAG_CONFIG_FILENAME),
     multimodalConfig: path.join(configDir, MULTIMODAL_CONFIG_FILENAME),
+    voiceConfig: path.join(configDir, VOICE_CONFIG_FILENAME),
     soulDir: path.join(stateDir, "soul"),
     memoryDir: path.join(stateDir, "memory"),
     mediaDir: path.join(dataDir, "media"),

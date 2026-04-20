@@ -285,6 +285,20 @@ export const MultimodalConfigSchema = z.object({
     .default({}),
 });
 
+export const VoiceConfigSchema = z.object({
+  stt: z
+    .object({
+      enabled: z.boolean().default(false),
+      provider: z.enum(["openai", "custom"]).default("openai"),
+      model: z.string().default("whisper-1"),
+      api_url: z.string().default(""),
+      api_key: z.string().default(""),
+      language: z.string().default("zh"),
+      max_file_size: z.number().int().positive().default(26214400),
+    })
+    .default({}),
+});
+
 export type LotteConfig = z.infer<typeof LotteConfigSchema>;
 export type AIConfig = z.infer<typeof AIConfigSchema>;
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
@@ -297,3 +311,4 @@ export type AutomationConfig = z.infer<typeof AutomationConfigSchema>;
 export type NotificationConfig = z.infer<typeof NotificationConfigSchema>;
 export type RAGConfig = z.infer<typeof RAGConfigSchema>;
 export type MultimodalConfig = z.infer<typeof MultimodalConfigSchema>;
+export type VoiceConfig = z.infer<typeof VoiceConfigSchema>;

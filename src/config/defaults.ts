@@ -10,6 +10,7 @@ import type {
   NotificationConfig,
   RAGConfig,
   MultimodalConfig,
+  VoiceConfig,
 } from "./schema.js";
 
 export function getMainConfigDefaults(): LotteConfig {
@@ -66,6 +67,16 @@ export function getAIConfigDefaults(): AIConfig {
           },
         },
       },
+      gemini: {
+        api_url: "https://generativelanguage.googleapis.com",
+        api_key: "",
+        models: {
+          "gemini-2.0-flash": {
+            context_window: 1048576,
+            max_output: 8192,
+          },
+        },
+      },
       custom: {
         api_url: "",
         api_key: "",
@@ -75,6 +86,7 @@ export function getAIConfigDefaults(): AIConfig {
     model_aliases: {
       gpt: "openai/gpt-4o",
       claude: "anthropic/claude-sonnet-4-20250514",
+      gemini: "gemini/gemini-2.0-flash",
     },
   };
 }
@@ -264,6 +276,20 @@ export function getMultimodalConfigDefaults(): MultimodalConfig {
       storage_dir: "",
       ttl_seconds: 120,
       http_port: 42873,
+    },
+  };
+}
+
+export function getVoiceConfigDefaults(): VoiceConfig {
+  return {
+    stt: {
+      enabled: false,
+      provider: "openai",
+      model: "whisper-1",
+      api_url: "",
+      api_key: "",
+      language: "zh",
+      max_file_size: 26214400,
     },
   };
 }

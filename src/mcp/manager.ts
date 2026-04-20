@@ -4,6 +4,8 @@ import type { MCPTool } from "./types.js";
 import { logger } from "../utils/logger.js";
 
 const CONNECT_TIMEOUT = 60_000;
+const RECONNECT_BASE_DELAY = 2000;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 export interface MCPClientEntry {
   key: string;
@@ -11,6 +13,8 @@ export interface MCPClientEntry {
   status: "connecting" | "connected" | "disconnected" | "error";
   error?: string;
   connectedAt?: number;
+  reconnectAttempts: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class MCPClientManager {
@@ -36,6 +40,8 @@ export class MCPClientManager {
           client: new StatefulMCPClient(clientConfig),
           status: "error",
           error: msg,
+          reconnectAttempts: 0,
+          reconnectTimer: null,
         });
       }
     }
@@ -48,6 +54,8 @@ export class MCPClientManager {
       key,
       client,
       status: "connecting",
+      reconnectAttempts: 0,
+      reconnectTimer: null,
     });
 
     try {
@@ -57,6 +65,8 @@ export class MCPClientManager {
         client,
         status: "connected",
         connectedAt: Date.now(),
+        reconnectAttempts: 0,
+        reconnectTimer: null,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -65,6 +75,8 @@ export class MCPClientManager {
         client,
         status: "error",
         error: msg,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
       });
       throw error;
     }
@@ -79,6 +91,8 @@ export class MCPClientManager {
       key,
       client: newClient,
       status: "connecting",
+      reconnectAttempts: 0,
+      reconnectTimer: null,
     });
 
     try {
@@ -98,6 +112,8 @@ export class MCPClientManager {
         client: newClient,
         status: "connected",
         connectedAt: Date.now(),
+        reconnectAttempts: 0,
+        reconnectTimer: null,
       });
 
       logger.info(`MCP client '${key}' replaced successfully`);
@@ -115,6 +131,8 @@ export class MCPClientManager {
         client: newClient,
         status: "error",
         error: msg,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
       });
 
       throw error;
@@ -124,6 +142,10 @@ export class MCPClientManager {
   async removeClient(key: string): Promise<void> {
     const entry = this.entries.get(key);
     if (!entry) return;
+
+    if (entry.reconnectTimer) {
+      clearTimeout(entry.reconnectTimer);
+    }
 
     this.entries.delete(key);
 
@@ -140,6 +162,10 @@ export class MCPClientManager {
     this.entries.clear();
 
     for (const [key, entry] of snapshot) {
+      if (entry.reconnectTimer) {
+        clearTimeout(entry.reconnectTimer);
+      }
+
       try {
         await entry.client.close();
       } catch (error) {
@@ -148,6 +174,100 @@ export class MCPClientManager {
     }
 
     logger.info("All MCP clients closed");
+  }
+
+  async reconnectClient(key: string): Promise<void> {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      throw new Error(`MCP client '${key}' not found`);
+    }
+
+    if (entry.reconnectTimer) {
+      clearTimeout(entry.reconnectTimer);
+      entry.reconnectTimer = null;
+    }
+
+    try {
+      await entry.client.close();
+    } catch {
+      // ignore
+    }
+
+    this.entries.set(key, {
+      ...entry,
+      status: "connecting",
+      error: undefined,
+    });
+
+    try {
+      await withTimeout(entry.client.connect(), CONNECT_TIMEOUT, `MCP client '${key}' reconnect`);
+      this.entries.set(key, {
+        ...entry,
+        status: "connected",
+        connectedAt: Date.now(),
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        error: undefined,
+      });
+      logger.info(`MCP client '${key}' reconnected successfully`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.entries.set(key, {
+        ...entry,
+        status: "error",
+        error: msg,
+      });
+      this.scheduleReconnect(key);
+      throw error;
+    }
+  }
+
+  private scheduleReconnect(key: string): void {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+
+    if (entry.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      logger.warn(`MCP client '${key}' exceeded max reconnect attempts (${MAX_RECONNECT_ATTEMPTS})`);
+      return;
+    }
+
+    entry.reconnectAttempts++;
+    const delay = RECONNECT_BASE_DELAY * Math.pow(2, entry.reconnectAttempts - 1);
+
+    logger.info(`MCP client '${key}' reconnecting in ${delay}ms (attempt ${entry.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+
+    entry.reconnectTimer = setTimeout(async () => {
+      entry.reconnectTimer = null;
+      try {
+        await this.reconnectClient(key);
+      } catch {
+        // scheduleReconnect is called inside reconnectClient on failure
+      }
+    }, delay);
+  }
+
+  async healthCheck(): Promise<Record<string, { healthy: boolean; error?: string }>> {
+    const result: Record<string, { healthy: boolean; error?: string }> = {};
+
+    for (const [key, entry] of this.entries) {
+      if (entry.status === "connected") {
+        if (entry.client.isConnected) {
+          result[key] = { healthy: true };
+        } else {
+          result[key] = { healthy: false, error: "Client reports disconnected" };
+          this.entries.set(key, {
+            ...entry,
+            status: "error",
+            error: "Client reports disconnected",
+          });
+          this.scheduleReconnect(key);
+        }
+      } else {
+        result[key] = { healthy: false, error: entry.error };
+      }
+    }
+
+    return result;
   }
 
   getConnectedClients(): StatefulMCPClient[] {
