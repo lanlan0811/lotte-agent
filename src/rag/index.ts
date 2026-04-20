@@ -14,8 +14,6 @@ import { logger } from "../utils/logger.js";
 import type { Database } from "../db/database.js";
 
 export class RAGManager {
-  private _config: RAGConfig;
-  private _aiConfig: AIConfig;
   private store: VectorStore;
   private loader: DocumentLoader;
   private chunker: DocumentChunker;
@@ -25,8 +23,6 @@ export class RAGManager {
   private initialized = false;
 
   constructor(config: RAGConfig, aiConfig: AIConfig, database: Database, dataDir: string) {
-    this._config = config;
-    this._aiConfig = aiConfig;
     this.ragDir = path.join(dataDir, "rag");
     this.store = new VectorStore(database.getDb());
     this.loader = new DocumentLoader();

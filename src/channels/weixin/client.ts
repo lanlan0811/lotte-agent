@@ -164,7 +164,7 @@ export class ILinkClient {
     if (!response.ok) throw new Error(`Download failed: ${response.status}`);
     let data = Buffer.from(await response.arrayBuffer());
     if (aesKeyB64) {
-      data = aesEcbDecrypt(data, aesKeyB64);
+      data = Buffer.from(aesEcbDecrypt(data, aesKeyB64));
     }
     return data;
   }

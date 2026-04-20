@@ -1,6 +1,5 @@
 import { BaseChannel } from "../base.js";
 import type {
-  ChannelMessage,
   ChannelResponse,
   ChannelType,
   ProcessHandler,
@@ -43,7 +42,7 @@ export class WeixinChannel extends BaseChannel {
     });
   }
 
-  resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
+  override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
     const groupId = (meta?.weixin_group_id as string)?.trim();
     if (groupId) return `weixin:group:${groupId}`;
     return senderId ? `weixin:${senderId}` : "weixin:unknown";
@@ -56,7 +55,7 @@ export class WeixinChannel extends BaseChannel {
       const iter = this.processedIds.values();
       for (let i = 0; i < PROCESSED_IDS_MAX / 2; i++) {
         iter.next();
-        this.processedIds.delete(iter.next().value);
+        this.processedIds.delete(iter.next().value!);
       }
     }
     return false;

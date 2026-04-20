@@ -165,7 +165,6 @@ export class LotteApp {
         try {
           const result = await this.chat(message.sessionId, this.extractTextFromMessage(message));
           if (result) {
-            const { ChannelResponse } = await import("./channels/types.js");
             return {
               toHandle: message.sessionId,
               content: [{ type: "text" as const, text: result.response ?? "" }],

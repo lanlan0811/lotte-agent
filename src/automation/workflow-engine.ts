@@ -207,10 +207,10 @@ export class WorkflowEngine {
       );
 
       for (let i = 0; i < results.length; i++) {
-        const r = results[i];
+        const r = results[i]!;
         const n = nodes[i];
         if (r.status === "rejected" && n?.onError === "stop") {
-          throw r.reason;
+          throw (r as PromiseRejectedResult).reason;
         }
       }
 

@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import type { CronSchedule, CronJob, CronJobState } from "./types.js";
+import type { CronSchedule, CronJob } from "./types.js";
 import { logger } from "../utils/logger.js";
 const MIN_REFIRE_GAP_MS = 2000;
 const ERROR_BACKOFF_BASE_MS = 5000;
@@ -50,8 +50,8 @@ function computePreviousRun(schedule: CronSchedule, nowMs: number): number | nul
   if (schedule.kind !== "cron") return null;
   try {
     const tz = schedule.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const cron = new Cron(schedule.expr, { timezone: tz });
-    const runs = cron.previousRun(new Date(nowMs));
+    const cron = new Cron(schedule.expr, { timezone: tz, startAt: new Date(nowMs) });
+    const runs = cron.previousRun();
     if (!runs) return null;
     const prevMs = runs.getTime();
     return Number.isFinite(prevMs) && prevMs < nowMs ? prevMs : null;

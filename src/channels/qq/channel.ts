@@ -38,7 +38,6 @@ export class QQChannel extends BaseChannel {
   private ws: WebSocket | null = null;
   private heartbeatInterval = 41250;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private _sessionId: string | null = null;
   private seq: number | null = null;
   private reconnectAttempts = 0;
   private renderer: MessageRenderer;
@@ -165,8 +164,7 @@ export class QQChannel extends BaseChannel {
       const d = data.d as Record<string, unknown>;
 
       if (t === "READY") {
-        this._sessionId = d.session_id as string;
-        this.reconnectAttempts = 0;
+          this.reconnectAttempts = 0;
         logger.info("QQ Bot session ready");
       } else if (t === "RESUMED") {
         this.reconnectAttempts = 0;
