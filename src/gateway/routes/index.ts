@@ -13,6 +13,7 @@ import { registerSkillRoutes } from "./skills.js";
 import { registerPluginRoutes } from "./plugins.js";
 import { registerChannelRoutes } from "./channels.js";
 import { registerAutomationRoutes } from "./automation.js";
+import { registerRAGRoutes } from "./rag.js";
 import { registerOpenAICompatRoutes } from "../openai-compat.js";
 
 export function registerRoutes(
@@ -35,6 +36,7 @@ export function registerRoutes(
   registerPluginRoutes(fastify, deps);
   registerChannelRoutes(fastify, deps);
   registerAutomationRoutes(fastify, deps);
+  registerRAGRoutes(fastify, deps, apiPrefix);
 
   registerOpenAICompatRoutes(fastify, deps, events);
 }

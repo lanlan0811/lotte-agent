@@ -27,6 +27,10 @@ import { WeixinChannel } from "./channels/weixin/channel.js";
 import { QQChannel } from "./channels/qq/channel.js";
 import { FeishuChannel } from "./channels/feishu/channel.js";
 import { AutomationManager } from "./automation/manager.js";
+import { RAGManager } from "./rag/index.js";
+import { NotificationDispatcher } from "./notification/index.js";
+import { MultimodalManager } from "./multimodal/index.js";
+import { SpeechToText } from "./voice/index.js";
 import { logger } from "./utils/logger.js";
 
 export class LotteApp {
@@ -52,6 +56,10 @@ export class LotteApp {
   private pluginLoader: PluginLoader | null = null;
   private channelManager: ChannelManager | null = null;
   private automationManager: AutomationManager | null = null;
+  private ragManager: RAGManager | null = null;
+  private notificationDispatcher: NotificationDispatcher | null = null;
+  private multimodalManager: MultimodalManager | null = null;
+  private speechToText: SpeechToText | null = null;
   private sessions: Map<string, Session> = new Map();
   private running = false;
 
@@ -257,6 +265,48 @@ export class LotteApp {
 
     await this.automationManager.start();
 
+    const ragConfig = this.config.getRAG();
+    if (ragConfig.enabled) {
+      try {
+        this.ragManager = new RAGManager(
+          ragConfig,
+          aiConfig,
+          this.db,
+          this.config.getPaths().dataDir,
+        );
+        this.ragManager.initialize();
+      } catch (error) {
+        logger.warn(`RAG initialization error: ${error}`);
+        this.ragManager = null;
+      }
+    }
+
+    const notificationConfig = this.config.getNotification();
+    this.notificationDispatcher = new NotificationDispatcher(
+      notificationConfig,
+      this.channelManager,
+    );
+
+    const multimodalConfig = this.config.getMultimodal();
+    if (multimodalConfig.vision.enabled || multimodalConfig.video.enabled || multimodalConfig.screenshot.browser_enabled) {
+      try {
+        this.multimodalManager = new MultimodalManager(
+          multimodalConfig,
+          this.modelManager,
+          this.config.getPaths().dataDir,
+        );
+        this.multimodalManager.initialize();
+      } catch (error) {
+        logger.warn(`Multimodal initialization error: ${error}`);
+        this.multimodalManager = null;
+      }
+    }
+
+    const voiceConfig = this.config.getVoice();
+    if (voiceConfig.stt.enabled) {
+      this.speechToText = new SpeechToText(voiceConfig.stt);
+    }
+
     const gatewayConfig = this.config.getGateway();
     this.gateway = new Gateway({
       app: this,
@@ -442,6 +492,22 @@ export class LotteApp {
 
   getAutomationManager(): AutomationManager | null {
     return this.automationManager;
+  }
+
+  getRAGManager(): RAGManager | null {
+    return this.ragManager;
+  }
+
+  getNotificationDispatcher(): NotificationDispatcher | null {
+    return this.notificationDispatcher;
+  }
+
+  getMultimodalManager(): MultimodalManager | null {
+    return this.multimodalManager;
+  }
+
+  getSpeechToText(): SpeechToText | null {
+    return this.speechToText;
   }
 
   private extractTextFromMessage(message: import("./channels/types.js").ChannelMessage): string {
