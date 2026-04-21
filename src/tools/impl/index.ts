@@ -23,10 +23,18 @@ import { httpFetchTool, webSearchTool } from "./network-tools.js";
 import { gitTool } from "./git-tool.js";
 import { codeSearchTool, codeAnalyzeTool } from "./code-tools.js";
 import { auditQueryTool, auditStatsTool } from "./audit-tool.js";
+import {
+  memorySearchTool,
+  memoryStoreTool,
+  memoryGetTool,
+  memoryDeleteTool,
+  setMemoryManager,
+} from "./memory-tools.js";
 import { logger } from "../../utils/logger.js";
 
 export { auditLog } from "./audit-tool.js";
 export type { AuditEntry, AuditLogConfig } from "./audit-tool.js";
+export { setMemoryManager };
 
 export function registerAllTools(registry: ToolRegistry): void {
   registry.register(execTool);
@@ -64,6 +72,11 @@ export function registerAllTools(registry: ToolRegistry): void {
   registry.register(auditQueryTool);
   registry.register(auditStatsTool);
 
+  registry.register(memorySearchTool);
+  registry.register(memoryStoreTool);
+  registry.register(memoryGetTool);
+  registry.register(memoryDeleteTool);
+
   logger.info(`Registered ${registry.size()} tools across ${registry.listCategories().length} categories`);
 }
 
@@ -96,4 +109,8 @@ export const toolList = [
   codeAnalyzeTool,
   auditQueryTool,
   auditStatsTool,
+  memorySearchTool,
+  memoryStoreTool,
+  memoryGetTool,
+  memoryDeleteTool,
 ] as const;

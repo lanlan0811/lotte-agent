@@ -6,7 +6,14 @@ import { ImageLoader } from "./vision/image-loader.js";
 import { VideoRunner } from "./video/video-runner.js";
 import { BrowserScreenshot, ScreenScreenshot } from "./screenshot/screenshot.js";
 import { MediaStore, MediaServer } from "./media/store.js";
+import { ImageOps } from "./media/image-ops.js";
+import { parseMediaTokens, extractMediaUrls, stripMediaTokens } from "./media/parse.js";
 import { logger } from "../utils/logger.js";
+
+export { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaToken, buildMediaHttpUrl } from "./media/parse.js";
+export { ImageOps } from "./media/image-ops.js";
+export type { ImageMetadata, ImageOpsConfig } from "./media/image-ops.js";
+export type { ParsedMediaSegment } from "./media/parse.js";
 
 export class MultimodalManager {
   private config: MultimodalConfig;
@@ -17,6 +24,7 @@ export class MultimodalManager {
   private screenScreenshot: ScreenScreenshot;
   private mediaStore: MediaStore;
   private mediaServer: MediaServer | null = null;
+  private imageOps: ImageOps;
 
   constructor(config: MultimodalConfig, modelManager: ModelManager, dataDir: string) {
     this.config = config;
@@ -32,10 +40,17 @@ export class MultimodalManager {
       ttl_seconds: config.media.ttl_seconds,
       http_port: config.media.http_port,
     });
+
+    this.imageOps = new ImageOps({
+      maxImageBytes: config.vision.max_image_bytes,
+    });
   }
 
   initialize(): void {
     this.mediaStore.initialize();
+    this.imageOps.initialize().catch((error) => {
+      logger.warn(`ImageOps initialization warning: ${error}`);
+    });
 
     if (this.config.media.http_port) {
       this.mediaServer = new MediaServer(this.mediaStore, this.config.media.http_port);
@@ -95,6 +110,33 @@ export class MultimodalManager {
 
   getMediaStore(): MediaStore {
     return this.mediaStore;
+  }
+
+  getImageOps(): ImageOps {
+    return this.imageOps;
+  }
+
+  parseMediaTokens(text: string) {
+    return parseMediaTokens(text);
+  }
+
+  extractMediaUrls(text: string) {
+    return extractMediaUrls(text);
+  }
+
+  stripMediaTokens(text: string) {
+    return stripMediaTokens(text);
+  }
+
+  async preprocessImage(
+    input: Buffer | string,
+    options?: { maxWidth?: number; maxHeight?: number; quality?: number; format?: "jpeg" | "png" | "webp" },
+  ) {
+    return this.imageOps.preprocess(input, options);
+  }
+
+  async compressImageToFit(input: Buffer | string, maxBytes: number) {
+    return this.imageOps.compressToFit(input, maxBytes);
   }
 
   shutdown(): void {

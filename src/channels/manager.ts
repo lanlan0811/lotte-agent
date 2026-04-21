@@ -10,26 +10,29 @@ export class ChannelManager {
   private queueManager: UnifiedQueueManager | null = null;
   private debouncer: DualLevelDebouncer;
   private _process: ProcessHandler;
-  private _onReplySent: OnReplySent;
+  private _onReplySent: OnReplySent | null;
   private _running = false;
 
-  constructor(process: ProcessHandler, onReplySent: OnReplySent = null) {
+  constructor(process: ProcessHandler, onReplySent: OnReplySent | null = null) {
     this._process = process;
     this._onReplySent = onReplySent;
+    void this._process;
+    void this._onReplySent;
 
     this.debouncer = new DualLevelDebouncer({
-      flushCallback: async (messages, sessionId, senderId) => {
-        for (const { message } of messages) {
-          const channelMsg = message as ChannelMessage;
-          const channelId = channelMsg.channelType;
-          this.enqueue(channelId, channelMsg);
+      flushCallback: async (messages, _sessionId, _senderId) => {
+        for (const item of messages) {
+          const channelMsg = item as { message: ChannelMessage };
+          const channelId = channelMsg.message.channelType;
+          this.enqueue(channelId, channelMsg.message);
         }
       },
-      typingCallback: async (sessionId, senderId) => {
+      typingCallback: async (_sessionId, _senderId) => {
         for (const channel of this.channels.values()) {
           try {
             if ("sendTyping" in channel && typeof (channel as Record<string, unknown>).sendTyping === "function") {
-              await ((channel as Record<string, { sendTyping: (sessionId: string) => Promise<void> }>).sendTyping(sessionId));
+              const ch = channel as unknown as { sendTyping: (sessionId: string) => Promise<void> };
+              await ch.sendTyping(_sessionId);
             }
           } catch {
             // Ignore typing indicator errors

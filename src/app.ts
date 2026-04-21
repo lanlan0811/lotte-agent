@@ -13,7 +13,7 @@ import { ReActEngine } from "./agent/react-engine.js";
 import { ToolInvoker } from "./agent/tool-invoker.js";
 import { Session } from "./agent/session.js";
 import { HookSystem, CompactionHook, BootGuidanceHook, MemoryGuidanceHook } from "./hooks/index.js";
-import { ToolRegistry, ToolPolicyPipeline, registerAllTools, auditLog } from "./tools/index.js";
+import { ToolRegistry, ToolPolicyPipeline, registerAllTools, auditLog, setMemoryManager } from "./tools/index.js";
 import { ApprovalSystem } from "./security/approval.js";
 import { VMSandbox } from "./security/sandbox.js";
 import { Gateway } from "./gateway/index.js";
@@ -96,6 +96,7 @@ export class LotteApp {
       shortTermMaxTokens: this.modelManager.getContextWindow(aiConfig.default_model),
     });
     this.memoryManager.initialize();
+    setMemoryManager(this.memoryManager);
 
     this.compactor = new ContextCompactor(this.modelManager);
 
