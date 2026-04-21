@@ -7,6 +7,26 @@ const CONNECT_TIMEOUT = 60_000;
 const RECONNECT_BASE_DELAY = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
+interface FailureRecord {
+  timestamp: number;
+  error: string;
+}
+
+interface CircuitBreakerState {
+  failures: FailureRecord[];
+  lastFailureAt: number | null;
+  consecutiveFailures: number;
+  state: "closed" | "open" | "half_open";
+  openedAt: number | null;
+  halfOpenSuccesses: number;
+}
+
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+const CIRCUIT_BREAKER_RESET_MS = 60_000;
+const CIRCUIT_BREAKER_HALF_OPEN_MAX = 2;
+const FAILURE_WINDOW_MS = 300_000;
+const MAX_FAILURE_RECORDS = 100;
+
 export interface MCPClientEntry {
   key: string;
   client: StatefulMCPClient;
@@ -15,10 +35,36 @@ export interface MCPClientEntry {
   connectedAt?: number;
   reconnectAttempts: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  circuitBreaker: CircuitBreakerState;
+  toolFailureTracker: Map<string, FailureRecord[]>;
 }
 
 export class MCPClientManager {
   private entries: Map<string, MCPClientEntry> = new Map();
+
+  private defaultCircuitBreaker(): CircuitBreakerState {
+    return {
+      failures: [],
+      lastFailureAt: null,
+      consecutiveFailures: 0,
+      state: "closed",
+      openedAt: null,
+      halfOpenSuccesses: 0,
+    };
+  }
+
+  private defaultEntry(key: string, client: StatefulMCPClient, status: MCPClientEntry["status"], error?: string): MCPClientEntry {
+    return {
+      key,
+      client,
+      status,
+      error,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      circuitBreaker: this.defaultCircuitBreaker(),
+      toolFailureTracker: new Map(),
+    };
+  }
 
   async initFromConfig(config: MCPConfig): Promise<void> {
     logger.info(`Initializing MCP clients from config (${Object.keys(config.clients).length} clients)`);
@@ -35,14 +81,7 @@ export class MCPClientManager {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         logger.warn(`Failed to initialize MCP client '${key}': ${msg}`);
-        this.entries.set(key, {
-          key,
-          client: new StatefulMCPClient(clientConfig),
-          status: "error",
-          error: msg,
-          reconnectAttempts: 0,
-          reconnectTimer: null,
-        });
+        this.entries.set(key, this.defaultEntry(key, new StatefulMCPClient(clientConfig), "error", msg));
       }
     }
   }
@@ -50,34 +89,16 @@ export class MCPClientManager {
   async addClient(key: string, config: MCPClientConfig): Promise<void> {
     const client = new StatefulMCPClient(config);
 
-    this.entries.set(key, {
-      key,
-      client,
-      status: "connecting",
-      reconnectAttempts: 0,
-      reconnectTimer: null,
-    });
+    this.entries.set(key, this.defaultEntry(key, client, "connecting"));
 
     try {
       await withTimeout(client.connect(), CONNECT_TIMEOUT, `MCP client '${key}' connect`);
-      this.entries.set(key, {
-        key,
-        client,
-        status: "connected",
-        connectedAt: Date.now(),
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-      });
+      const entry = this.defaultEntry(key, client, "connected");
+      entry.connectedAt = Date.now();
+      this.entries.set(key, entry);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.entries.set(key, {
-        key,
-        client,
-        status: "error",
-        error: msg,
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-      });
+      this.entries.set(key, this.defaultEntry(key, client, "error", msg));
       throw error;
     }
   }
@@ -87,13 +108,7 @@ export class MCPClientManager {
 
     const newClient = new StatefulMCPClient(config);
 
-    this.entries.set(key, {
-      key,
-      client: newClient,
-      status: "connecting",
-      reconnectAttempts: 0,
-      reconnectTimer: null,
-    });
+    this.entries.set(key, this.defaultEntry(key, newClient, "connecting"));
 
     try {
       await withTimeout(newClient.connect(), CONNECT_TIMEOUT, `MCP client '${key}' replace`);
@@ -107,14 +122,9 @@ export class MCPClientManager {
         }
       }
 
-      this.entries.set(key, {
-        key,
-        client: newClient,
-        status: "connected",
-        connectedAt: Date.now(),
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-      });
+      const entry = this.defaultEntry(key, newClient, "connected");
+      entry.connectedAt = Date.now();
+      this.entries.set(key, entry);
 
       logger.info(`MCP client '${key}' replaced successfully`);
     } catch (error) {
@@ -126,14 +136,7 @@ export class MCPClientManager {
         // Ignore
       }
 
-      this.entries.set(key, {
-        key,
-        client: newClient,
-        status: "error",
-        error: msg,
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-      });
+      this.entries.set(key, this.defaultEntry(key, newClient, "error", msg));
 
       throw error;
     }
@@ -193,30 +196,24 @@ export class MCPClientManager {
       // ignore
     }
 
-    this.entries.set(key, {
-      ...entry,
-      status: "connecting",
-      error: undefined,
-    });
+    entry.status = "connecting";
+    entry.error = undefined;
 
     try {
       await withTimeout(entry.client.connect(), CONNECT_TIMEOUT, `MCP client '${key}' reconnect`);
-      this.entries.set(key, {
-        ...entry,
-        status: "connected",
-        connectedAt: Date.now(),
-        reconnectAttempts: 0,
-        reconnectTimer: null,
-        error: undefined,
-      });
+      entry.status = "connected";
+      entry.connectedAt = Date.now();
+      entry.reconnectAttempts = 0;
+      entry.reconnectTimer = null;
+      entry.error = undefined;
+      entry.circuitBreaker = this.defaultCircuitBreaker();
+      entry.toolFailureTracker.clear();
       logger.info(`MCP client '${key}' reconnected successfully`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.entries.set(key, {
-        ...entry,
-        status: "error",
-        error: msg,
-      });
+      entry.status = "error";
+      entry.error = msg;
+      this.recordFailure(entry, msg);
       this.scheduleReconnect(key);
       throw error;
     }
@@ -309,7 +306,113 @@ export class MCPClientManager {
     if (!entry || entry.status !== "connected") {
       throw new Error(`MCP client '${clientKey}' not connected`);
     }
-    return entry.client.callTool(toolName, args);
+
+    if (!this.checkCircuitBreaker(entry)) {
+      throw new Error(`MCP client '${clientKey}' circuit breaker is open, please retry later`);
+    }
+
+    if (this.isToolInBackoff(entry, toolName)) {
+      throw new Error(`MCP tool '${toolName}' on client '${clientKey}' is in backoff, please retry later`);
+    }
+
+    try {
+      const result = await entry.client.callTool(toolName, args);
+      this.recordSuccess(entry, toolName);
+      return result;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.recordFailure(entry, msg, toolName);
+      throw error;
+    }
+  }
+
+  private recordFailure(entry: MCPClientEntry, error: string, toolName?: string): void {
+    const now = Date.now();
+    const record: FailureRecord = { timestamp: now, error };
+
+    entry.circuitBreaker.failures.push(record);
+    entry.circuitBreaker.lastFailureAt = now;
+    entry.circuitBreaker.consecutiveFailures++;
+
+    if (entry.circuitBreaker.failures.length > MAX_FAILURE_RECORDS) {
+      entry.circuitBreaker.failures = entry.circuitBreaker.failures.slice(-MAX_FAILURE_RECORDS);
+    }
+
+    if (entry.circuitBreaker.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+      entry.circuitBreaker.state = "open";
+      entry.circuitBreaker.openedAt = now;
+      logger.warn(`MCP client '${entry.key}' circuit breaker opened after ${entry.circuitBreaker.consecutiveFailures} consecutive failures`);
+    }
+
+    if (toolName) {
+      const toolFailures = entry.toolFailureTracker.get(toolName) ?? [];
+      toolFailures.push(record);
+      if (toolFailures.length > MAX_FAILURE_RECORDS) {
+        entry.toolFailureTracker.set(toolName, toolFailures.slice(-MAX_FAILURE_RECORDS));
+      } else {
+        entry.toolFailureTracker.set(toolName, toolFailures);
+      }
+    }
+  }
+
+  private recordSuccess(entry: MCPClientEntry, toolName?: string): void {
+    if (entry.circuitBreaker.state === "half_open") {
+      entry.circuitBreaker.halfOpenSuccesses++;
+      if (entry.circuitBreaker.halfOpenSuccesses >= CIRCUIT_BREAKER_HALF_OPEN_MAX) {
+        entry.circuitBreaker.state = "closed";
+        entry.circuitBreaker.consecutiveFailures = 0;
+        entry.circuitBreaker.openedAt = null;
+        entry.circuitBreaker.halfOpenSuccesses = 0;
+        logger.info(`MCP client '${entry.key}' circuit breaker closed after successful recovery`);
+      }
+    } else {
+      entry.circuitBreaker.consecutiveFailures = 0;
+    }
+
+    if (toolName) {
+      entry.toolFailureTracker.delete(toolName);
+    }
+  }
+
+  private checkCircuitBreaker(entry: MCPClientEntry): boolean {
+    const cb = entry.circuitBreaker;
+
+    if (cb.state === "closed") {
+      return true;
+    }
+
+    if (cb.state === "open") {
+      if (cb.openedAt && Date.now() - cb.openedAt >= CIRCUIT_BREAKER_RESET_MS) {
+        cb.state = "half_open";
+        cb.halfOpenSuccesses = 0;
+        logger.info(`MCP client '${entry.key}' circuit breaker moved to half-open`);
+        return true;
+      }
+      return false;
+    }
+
+    if (cb.state === "half_open") {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isToolInBackoff(entry: MCPClientEntry, toolName: string): boolean {
+    const failures = entry.toolFailureTracker.get(toolName);
+    if (!failures || failures.length === 0) return false;
+
+    const recentFailures = failures.filter(
+      (f) => Date.now() - f.timestamp < FAILURE_WINDOW_MS,
+    );
+
+    if (recentFailures.length < 3) return false;
+
+    const lastFailure = recentFailures[recentFailures.length - 1];
+    const backoffDelay = RECONNECT_BASE_DELAY * Math.pow(2, Math.min(recentFailures.length - 1, 5));
+    const backoffUntil = lastFailure.timestamp + backoffDelay;
+
+    return Date.now() < backoffUntil;
   }
 
   getStatus(): Record<string, {

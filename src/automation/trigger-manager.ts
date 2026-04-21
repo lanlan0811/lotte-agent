@@ -1,4 +1,4 @@
-import type { TriggerRule, Event, EventHandler } from "./types.js";
+import type { TriggerRule, Event, EventHandler, EventPayload } from "./types.js";
 import { EventBus } from "./event-bus.js";
 import { logger } from "../utils/logger.js";
 
@@ -113,11 +113,205 @@ export class TriggerManager {
   private evaluateCondition(condition: string, event: Event): boolean {
     const payload = event.payload;
     try {
-      const fn = new Function("payload", "event", `return (${condition})`);
-      return Boolean(fn(payload, event));
+      return this.safeEvaluate(condition, payload, event);
     } catch {
       return false;
     }
+  }
+
+  private safeEvaluate(condition: string, payload: EventPayload, event: Event): boolean {
+    const tokens = this.tokenize(condition);
+    return this.parseOr(tokens, payload, event);
+  }
+
+  private tokenize(expr: string): string[] {
+    const tokens: string[] = [];
+    let current = "";
+    let i = 0;
+
+    while (i < expr.length) {
+      const ch = expr[i];
+
+      if (ch === " " || ch === "\t") {
+        if (current) {
+          tokens.push(current);
+          current = "";
+        }
+        i++;
+        continue;
+      }
+
+      if (ch === "(" || ch === ")" || ch === ",") {
+        if (current) {
+          tokens.push(current);
+          current = "";
+        }
+        tokens.push(ch);
+        i++;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'") {
+        if (current) {
+          tokens.push(current);
+          current = "";
+        }
+        const quote = ch;
+        i++;
+        let str = "";
+        while (i < expr.length && expr[i] !== quote) {
+          if (expr[i] === "\\" && i + 1 < expr.length) {
+            str += expr[i + 1];
+            i += 2;
+          } else {
+            str += expr[i];
+            i++;
+          }
+        }
+        i++;
+        tokens.push(`__str:${str}`);
+        continue;
+      }
+
+      current += ch;
+      i++;
+    }
+
+    if (current) {
+      tokens.push(current);
+    }
+
+    return tokens;
+  }
+
+  private parseOr(tokens: string[], payload: EventPayload, event: Event): boolean {
+    let result = this.parseAnd(tokens, payload, event);
+    while (tokens.length > 0 && tokens[0] === "||") {
+      tokens.shift();
+      const right = this.parseAnd(tokens, payload, event);
+      result = result || right;
+    }
+    return result;
+  }
+
+  private parseAnd(tokens: string[], payload: EventPayload, event: Event): boolean {
+    let result = this.parseComparison(tokens, payload, event);
+    while (tokens.length > 0 && tokens[0] === "&&") {
+      tokens.shift();
+      const right = this.parseComparison(tokens, payload, event);
+      result = result && right;
+    }
+    return result;
+  }
+
+  private parseComparison(tokens: string[], payload: EventPayload, event: Event): boolean {
+    if (tokens.length > 0 && tokens[0] === "(") {
+      tokens.shift();
+      const result = this.parseOr(tokens, payload, event);
+      if (tokens.length > 0 && tokens[0] === ")") {
+        tokens.shift();
+      }
+      return result;
+    }
+
+    if (tokens.length > 0 && tokens[0] === "!") {
+      tokens.shift();
+      return !this.parseComparison(tokens, payload, event);
+    }
+
+    const left = this.resolveValue(tokens, payload, event);
+    if (tokens.length === 0) {
+      return Boolean(left);
+    }
+
+    const op = tokens.shift();
+    if (!op) return Boolean(left);
+
+    const comparisonOps = new Set(["==", "!=", "===", "!==", ">", ">=", "<", "<="]);
+    if (!comparisonOps.has(op)) {
+      return Boolean(left);
+    }
+
+    const right = this.resolveValue(tokens, payload, event);
+
+    switch (op) {
+      case "==":
+      case "===":
+        return left === right;
+      case "!=":
+      case "!==":
+        return left !== right;
+      case ">":
+        return (left as number) > (right as number);
+      case ">=":
+        return (left as number) >= (right as number);
+      case "<":
+        return (left as number) < (right as number);
+      case "<=":
+        return (left as number) <= (right as number);
+      default:
+        return false;
+    }
+  }
+
+  private resolveValue(tokens: string[], payload: EventPayload, event: Event): unknown {
+    if (tokens.length === 0) return undefined;
+
+    const token = tokens.shift()!;
+    if (!token) return undefined;
+
+    if (token.startsWith("__str:")) {
+      return token.slice(6);
+    }
+
+    if (token === "true") return true;
+    if (token === "false") return false;
+    if (token === "null") return null;
+    if (token === "undefined") return undefined;
+
+    if (/^-?\d+(\.\d+)?$/.test(token)) {
+      return Number(token);
+    }
+
+    if (token === "payload" || token === "event") {
+      const obj = token === "payload" ? payload : event;
+      if (tokens.length > 0 && tokens[0] === ".") {
+        tokens.shift();
+        return this.resolveProperty(obj, tokens);
+      }
+      return obj;
+    }
+
+    return undefined;
+  }
+
+  private resolveProperty(obj: unknown, tokens: string[]): unknown {
+    if (obj === null || obj === undefined) return undefined;
+
+    const propName = tokens.shift();
+    if (!propName) return obj;
+
+    const record = obj as Record<string, unknown>;
+    const value = record[propName];
+
+    if (tokens.length > 0 && tokens[0] === ".") {
+      tokens.shift();
+      return this.resolveProperty(value, tokens);
+    }
+
+    if (tokens.length > 0 && tokens[0] === "[") {
+      tokens.shift();
+      const indexStr = tokens.shift();
+      if (tokens.length > 0 && tokens[0] === "]") {
+        tokens.shift();
+      }
+      const index = Number(indexStr);
+      if (Array.isArray(value) && !isNaN(index)) {
+        return value[index];
+      }
+    }
+
+    return value;
   }
 
   start(): void {

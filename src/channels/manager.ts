@@ -2,11 +2,13 @@ import type { BaseChannel } from "./base.js";
 import type { ChannelMessage, ProcessHandler, OnReplySent, QueueKey, ChannelInfo } from "./types.js";
 import { PRIORITY_NORMAL } from "./types.js";
 import { UnifiedQueueManager } from "./queue.js";
+import { DualLevelDebouncer } from "./debounce.js";
 import { logger } from "../utils/logger.js";
 
 export class ChannelManager {
   private channels: Map<string, BaseChannel> = new Map();
   private queueManager: UnifiedQueueManager | null = null;
+  private debouncer: DualLevelDebouncer;
   private _process: ProcessHandler;
   private _onReplySent: OnReplySent;
   private _running = false;
@@ -14,8 +16,27 @@ export class ChannelManager {
   constructor(process: ProcessHandler, onReplySent: OnReplySent = null) {
     this._process = process;
     this._onReplySent = onReplySent;
-    void this._process;
-    void this._onReplySent;
+
+    this.debouncer = new DualLevelDebouncer({
+      flushCallback: async (messages, sessionId, senderId) => {
+        for (const { message } of messages) {
+          const channelMsg = message as ChannelMessage;
+          const channelId = channelMsg.channelType;
+          this.enqueue(channelId, channelMsg);
+        }
+      },
+      typingCallback: async (sessionId, senderId) => {
+        for (const channel of this.channels.values()) {
+          try {
+            if ("sendTyping" in channel && typeof (channel as Record<string, unknown>).sendTyping === "function") {
+              await ((channel as Record<string, { sendTyping: (sessionId: string) => Promise<void> }>).sendTyping(sessionId));
+            }
+          } catch {
+            // Ignore typing indicator errors
+          }
+        }
+      },
+    });
   }
 
   register(channel: BaseChannel): void {
@@ -61,6 +82,11 @@ export class ChannelManager {
     this.queueManager.enqueue(queueKey, payload).catch((err) => {
       logger.error(`Enqueue failed: channel=${channelId} session=${sessionId} error=${err}`);
     });
+  }
+
+  enqueueDebounced(channelId: string, payload: ChannelMessage): void {
+    const sessionId = payload.sessionId || `${channelId}:${payload.senderId}`;
+    this.debouncer.push(sessionId, payload.senderId, payload);
   }
 
   private async consumeMessage(
@@ -113,6 +139,8 @@ export class ChannelManager {
 
   async stopAll(): Promise<void> {
     if (!this._running) return;
+
+    this.debouncer.cleanupAll();
 
     if (this.queueManager) {
       await this.queueManager.stopAll();

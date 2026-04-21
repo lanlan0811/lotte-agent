@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import type { SkillManifest, SkillPoolManifest } from "./types.js";
@@ -7,6 +7,7 @@ import { logger } from "../utils/logger.js";
 const POOL_DIR_NAME = "skill_pool";
 const MANIFEST_FILE = "manifest.json";
 const SKILL_FILE = "SKILL.md";
+const TEMP_SUFFIX = ".tmp";
 
 export class SkillManager {
   private poolDir: string;
@@ -70,7 +71,7 @@ export class SkillManager {
       if (!existsSync(refsDir)) {
         mkdirSync(refsDir, { recursive: true });
       }
-      this.writeTree(refsDir, skill.references);
+      this.writeTreeAtomic(refsDir, skill.references);
     }
 
     if (skill.scripts && Object.keys(skill.scripts).length > 0) {
@@ -78,7 +79,7 @@ export class SkillManager {
       if (!existsSync(scriptsDir)) {
         mkdirSync(scriptsDir, { recursive: true });
       }
-      this.writeTree(scriptsDir, skill.scripts);
+      this.writeTreeAtomic(scriptsDir, skill.scripts);
     }
 
     this.manifest.skills[skill.name] = manifest;
@@ -101,7 +102,7 @@ export class SkillManager {
     if (updates.content) {
       updated.signature = this.computeSignature(updates.content);
       const skillDir = join(this.poolDir, name);
-      writeFileSync(join(skillDir, SKILL_FILE), updates.content, "utf-8");
+      this.atomicWriteFile(join(skillDir, SKILL_FILE), updates.content);
     }
 
     this.manifest.skills[name] = updated;
@@ -184,7 +185,23 @@ export class SkillManager {
   private saveManifest(): void {
     this.manifest.version++;
     const data = JSON.stringify(this.manifest, null, 2);
-    writeFileSync(this.manifestPath, data, "utf-8");
+    this.atomicWriteFile(this.manifestPath, data);
+  }
+
+  private atomicWriteFile(filePath: string, data: string): void {
+    const tempPath = filePath + TEMP_SUFFIX;
+    writeFileSync(tempPath, data, "utf-8");
+
+    try {
+      renameSync(tempPath, filePath);
+    } catch (error) {
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
   }
 
   private reconcileManifest(): void {
@@ -291,6 +308,20 @@ export class SkillManager {
           mkdirSync(fullPath, { recursive: true });
         }
         this.writeTree(fullPath, value as Record<string, unknown>);
+      }
+    }
+  }
+
+  private writeTreeAtomic(dir: string, tree: Record<string, unknown>): void {
+    for (const [key, value] of Object.entries(tree)) {
+      const fullPath = join(dir, key);
+      if (typeof value === "string") {
+        this.atomicWriteFile(fullPath, value);
+      } else if (typeof value === "object" && value !== null) {
+        if (!existsSync(fullPath)) {
+          mkdirSync(fullPath, { recursive: true });
+        }
+        this.writeTreeAtomic(fullPath, value as Record<string, unknown>);
       }
     }
   }

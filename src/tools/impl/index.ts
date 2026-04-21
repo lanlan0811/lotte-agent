@@ -8,6 +8,16 @@ import {
   browserFillTool,
   browserExtractTool,
   browserExecuteTool,
+  browserHoverTool,
+  browserSelectTool,
+  browserScrollTool,
+  browserWaitTool,
+  browserTypeTool,
+  browserUploadTool,
+  browserGoBackTool,
+  browserGoForwardTool,
+  browserPressKeyTool,
+  browserGetContentTool,
 } from "./browser-tools.js";
 import { httpFetchTool, webSearchTool } from "./network-tools.js";
 import { gitTool } from "./git-tool.js";
@@ -32,6 +42,16 @@ export function registerAllTools(registry: ToolRegistry): void {
   registry.register(browserFillTool);
   registry.register(browserExtractTool);
   registry.register(browserExecuteTool);
+  registry.register(browserHoverTool);
+  registry.register(browserSelectTool);
+  registry.register(browserScrollTool);
+  registry.register(browserWaitTool);
+  registry.register(browserTypeTool);
+  registry.register(browserUploadTool);
+  registry.register(browserGoBackTool);
+  registry.register(browserGoForwardTool);
+  registry.register(browserPressKeyTool);
+  registry.register(browserGetContentTool);
 
   registry.register(httpFetchTool);
   registry.register(webSearchTool);
@@ -59,6 +79,16 @@ export const toolList = [
   browserFillTool,
   browserExtractTool,
   browserExecuteTool,
+  browserHoverTool,
+  browserSelectTool,
+  browserScrollTool,
+  browserWaitTool,
+  browserTypeTool,
+  browserUploadTool,
+  browserGoBackTool,
+  browserGoForwardTool,
+  browserPressKeyTool,
+  browserGetContentTool,
   httpFetchTool,
   webSearchTool,
   gitTool,

@@ -10,6 +10,7 @@ import { OpenAIProvider } from "./openai-provider.js";
 import { AnthropicProvider } from "./anthropic-provider.js";
 import { CustomProvider } from "./custom-provider.js";
 import { GeminiProvider } from "./gemini-provider.js";
+import { ProviderRateLimiterRegistry } from "./rate-limiter.js";
 import { logger } from "../utils/logger.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128000;
@@ -20,10 +21,12 @@ export class ModelManager {
   private modelAliases: Map<string, string> = new Map();
   private defaultProvider: string;
   private defaultModel: string;
+  private rateLimiterRegistry: ProviderRateLimiterRegistry;
 
   constructor(aiConfig: AIConfig) {
     this.defaultProvider = aiConfig.default_provider;
     this.defaultModel = aiConfig.default_model;
+    this.rateLimiterRegistry = new ProviderRateLimiterRegistry();
 
     for (const [providerId, providerConfig] of Object.entries(aiConfig.providers)) {
       if (!providerConfig.api_key) {
@@ -39,6 +42,7 @@ export class ModelManager {
 
       if (provider) {
         this.providers.set(providerId, provider);
+        this.rateLimiterRegistry.registerProvider(providerId);
         logger.debug(`Registered provider: ${providerId}`);
       }
     }
@@ -75,7 +79,29 @@ export class ModelManager {
       model,
     };
 
-    return providerInstance.chat(enrichedRequest);
+    const limiter = this.rateLimiterRegistry.getLimiter(provider);
+    const retryHandler = this.rateLimiterRegistry.getRetryHandler(provider);
+    const estimatedTokens = this.estimateTokens(request);
+
+    if (limiter) {
+      await limiter.acquire(estimatedTokens);
+    }
+
+    try {
+      if (retryHandler) {
+        return await retryHandler.executeWithRetry(
+          () => providerInstance.chat(enrichedRequest),
+          (error, attempt, delay) => {
+            logger.warn(`Provider ${provider} chat retry ${attempt}, delay ${delay}ms: ${error}`);
+          },
+        );
+      }
+      return await providerInstance.chat(enrichedRequest);
+    } finally {
+      if (limiter) {
+        limiter.release();
+      }
+    }
   }
 
   async chatStream(
@@ -90,7 +116,45 @@ export class ModelManager {
       model,
     };
 
-    return providerInstance.chatStream(enrichedRequest, callback);
+    const limiter = this.rateLimiterRegistry.getLimiter(provider);
+    const retryHandler = this.rateLimiterRegistry.getRetryHandler(provider);
+    const estimatedTokens = this.estimateTokens(request);
+
+    if (limiter) {
+      await limiter.acquire(estimatedTokens);
+    }
+
+    try {
+      if (retryHandler) {
+        return await retryHandler.executeWithRetry(
+          () => providerInstance.chatStream(enrichedRequest, callback),
+          (error, attempt, delay) => {
+            logger.warn(`Provider ${provider} stream retry ${attempt}, delay ${delay}ms: ${error}`);
+          },
+        );
+      }
+      return await providerInstance.chatStream(enrichedRequest, callback);
+    } finally {
+      if (limiter) {
+        limiter.release();
+      }
+    }
+  }
+
+  private estimateTokens(request: ChatCompletionRequest): number {
+    let totalChars = 0;
+    for (const msg of request.messages) {
+      if (typeof msg.content === "string") {
+        totalChars += msg.content.length;
+      } else {
+        for (const part of msg.content) {
+          if (part.type === "text") {
+            totalChars += part.text.length;
+          }
+        }
+      }
+    }
+    return Math.ceil(totalChars / 3.5);
   }
 
   resolveModel(modelId: string): { provider: string; model: string } {
