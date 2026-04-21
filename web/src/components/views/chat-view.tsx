@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useRef, useEffect, useState } from "react";
-import { Send, Copy, Check, Wrench, Loader2, Plus } from "lucide-react";
+import { Send, Copy, Check, Wrench, Loader2, Plus, AlertCircle, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore, type ChatMessage, type ToolCallInfo } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
+import { wsClient } from "@/lib/ws-client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -46,10 +47,54 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function ErrorMessage({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <p>{message}</p>
+        {onRetry && (
+          <Button variant="link" size="sm" className="h-auto p-0 text-destructive underline" onClick={onRetry}>
+            {t("common.retry") || "Retry"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectionBanner() {
+  const [wsStatus, setWsStatus] = useState(wsClient.status);
+
+  useEffect(() => {
+    const unsub = wsClient.onStatus(setWsStatus);
+    return unsub;
+  }, []);
+
+  if (wsStatus === "connected" || wsStatus === "disconnected") return null;
+
+  return (
+    <div className="flex items-center gap-2 bg-yellow-500/10 border-b border-yellow-500/20 px-4 py-2 text-sm text-yellow-600 dark:text-yellow-400">
+      {wsStatus === "reconnecting" ? (
+        <>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>{t("chat.reconnecting") || "Reconnecting..."}</span>
+        </>
+      ) : (
+        <>
+          <WifiOff className="h-3.5 w-3.5" />
+          <span>{t("chat.connecting") || "Connecting..."}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => void }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
+  const isError = message.status === "error";
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -60,28 +105,32 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={cn("flex gap-3 py-4", isUser && "flex-row-reverse")}>
       <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback className={cn("text-xs", isUser ? "bg-primary text-primary-foreground" : "bg-muted")}>
-          {isUser ? "U" : "L"}
+        <AvatarFallback className={cn("text-xs", isUser ? "bg-primary text-primary-foreground" : isError ? "bg-destructive text-destructive-foreground" : "bg-muted")}>
+          {isUser ? "U" : isError ? "!" : "L"}
         </AvatarFallback>
       </Avatar>
       <div className={cn("flex-1 space-y-1 max-w-[80%]", isUser && "flex flex-col items-end")}>
-        <div
-          className={cn(
-            "rounded-xl px-4 py-2.5 text-sm leading-relaxed",
-            isUser
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted",
-          )}
-        >
-          {message.status === "streaming" && !message.content ? (
+        {message.status === "streaming" && !message.content ? (
+          <div className={cn("rounded-xl px-4 py-2.5 text-sm", "bg-muted")}>
             <div className="flex items-center gap-2">
               <Loader2 className="h-3 w-3 animate-spin" />
               <span className="text-muted-foreground">{t("chat.thinking")}</span>
             </div>
-          ) : (
+          </div>
+        ) : isError ? (
+          <ErrorMessage message={message.content} onRetry={onRetry} />
+        ) : (
+          <div
+            className={cn(
+              "rounded-xl px-4 py-2.5 text-sm leading-relaxed",
+              isUser
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted",
+            )}
+          >
             <div className="whitespace-pre-wrap break-words">{message.content}</div>
-          )}
-        </div>
+          </div>
+        )}
         {message.toolCalls?.map((tc) => (
           <ToolCallBlock key={tc.id} toolCall={tc} />
         ))}
@@ -99,6 +148,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 export function ChatView() {
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const {
@@ -132,7 +182,9 @@ export function ChatView() {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
+
+    setSending(true);
 
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -178,15 +230,63 @@ export function ChatView() {
           status: "done",
         });
       } else {
-        updateMessage(sessionId, assistantMsg.id, {
-          content: result.error?.message || "Request failed",
-          status: "error",
-        });
+        const errorCode = result.error?.code || "UNKNOWN";
+        const errorMessage = result.error?.message || "Request failed";
+
+        if (errorCode === "TIMEOUT") {
+          updateMessage(sessionId, assistantMsg.id, {
+            content: "Request timed out. The server may be processing your request. Please try again.",
+            status: "error",
+          });
+        } else if (errorCode === "NETWORK_ERROR") {
+          updateMessage(sessionId, assistantMsg.id, {
+            content: "Unable to connect to the server. Please check if Lotte is running.",
+            status: "error",
+          });
+        } else {
+          updateMessage(sessionId, assistantMsg.id, {
+            content: errorMessage,
+            status: "error",
+          });
+        }
       }
     } catch {
       updateMessage(sessionId, assistantMsg.id, {
-        content: "Network error",
+        content: "An unexpected error occurred.",
         status: "error",
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleRetry = (msgId: string) => {
+    const lastUserMsg = [...sessionMessages].reverse().find((m) => m.role === "user");
+    if (lastUserMsg) {
+      updateMessage(activeSessionId!, msgId, {
+        content: "",
+        status: "streaming",
+      });
+      apiClient.post<{ response?: string }>(
+        `/api/v1/chat/${activeSessionId}`,
+        { text: lastUserMsg.content },
+      ).then((result) => {
+        if (result.ok && result.data) {
+          updateMessage(activeSessionId!, msgId, {
+            content: result.data.response || "",
+            status: "done",
+          });
+        } else {
+          updateMessage(activeSessionId!, msgId, {
+            content: result.error?.message || "Retry failed",
+            status: "error",
+          });
+        }
+      }).catch(() => {
+        updateMessage(activeSessionId!, msgId, {
+          content: "Retry failed. Please try again.",
+          status: "error",
+        });
       });
     }
   };
@@ -200,6 +300,7 @@ export function ChatView() {
 
   return (
     <div className="flex flex-col h-full">
+      <ConnectionBanner />
       {!activeSessionId && sessionMessages.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
           <div className="h-16 w-16 rounded-2xl bg-muted flex items-center justify-center">
@@ -219,7 +320,11 @@ export function ChatView() {
           <ScrollArea className="flex-1 px-4">
             <div ref={scrollRef} className="max-w-3xl mx-auto">
               {sessionMessages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onRetry={msg.status === "error" && msg.role === "assistant" ? () => handleRetry(msg.id) : undefined}
+                />
               ))}
             </div>
           </ScrollArea>
@@ -234,14 +339,15 @@ export function ChatView() {
                 placeholder={t("chat.placeholder")}
                 className="min-h-[44px] max-h-[200px] resize-none"
                 rows={1}
+                disabled={sending}
               />
               <Button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() || sending}
                 size="icon"
                 className="shrink-0 h-[44px] w-[44px]"
               >
-                <Send className="h-4 w-4" />
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
           </div>
