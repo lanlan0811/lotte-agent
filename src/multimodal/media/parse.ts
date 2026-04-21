@@ -82,6 +82,54 @@ export function buildMediaHttpUrl(mediaId: string, port: number): string {
   return `http://127.0.0.1:${port}/media/${mediaId}`;
 }
 
+export interface MediaToken {
+  raw: string;
+  filePath: string;
+  mediaUrl: string;
+}
+
+export function replaceMediaTokens(text: string, mediaServerUrl: string): string {
+  const regex = new RegExp(MEDIA_TOKEN_RE.source, "gi");
+  return text.replace(regex, (fullMatch, rawPath: string) => {
+    const cleaned = cleanMediaUrl(rawPath?.trim());
+    if (!cleaned) return fullMatch;
+
+    if (isHttpUrl(cleaned) || isDataUrl(cleaned)) {
+      return cleaned;
+    }
+
+    const filename = cleaned.split(/[\\/]/).pop() ?? cleaned;
+    return `${mediaServerUrl}/media/${encodeURIComponent(filename)}`;
+  });
+}
+
+export function isMediaToken(text: string): boolean {
+  return /\bMEDIA:\s*`?[^\n`]+`?/i.test(text);
+}
+
+export function extractMediaTokens(text: string, mediaServerUrl: string): MediaToken[] {
+  const tokens: MediaToken[] = [];
+  const regex = new RegExp(MEDIA_TOKEN_RE.source, "gi");
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const rawUrl = match[1]?.trim();
+    if (rawUrl) {
+      const cleaned = cleanMediaUrl(rawUrl);
+      if (cleaned) {
+        const filename = cleaned.split(/[\\/]/).pop() ?? cleaned;
+        tokens.push({
+          raw: match[0],
+          filePath: cleaned,
+          mediaUrl: `${mediaServerUrl}/media/${encodeURIComponent(filename)}`,
+        });
+      }
+    }
+  }
+
+  return tokens;
+}
+
 function cleanMediaUrl(raw: string): string | null {
   const candidate = raw.replace(/^[`"'[{(]+/, "").replace(/[`"'\\})\],]+$/, "");
 

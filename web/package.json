@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:export": "BUILD_MODE=export next build",
     "start": "next start",
     "lint": "eslint"
   },

@@ -22,6 +22,14 @@ interface PatternRule {
   message: string;
 }
 
+interface PatternRuleDef {
+  id: string;
+  severity?: ScanSeverity;
+  pattern: string;
+  flags?: string;
+  message: string;
+}
+
 const DEFAULT_PATTERN_RULES: PatternRule[] = [
   {
     id: "dangerous-exec",
@@ -84,14 +92,60 @@ export class SkillScanner {
     maxFiles?: number;
     maxFileSize?: number;
     skipExtensions?: string[];
+    rulesDir?: string;
   }) {
-    this.rules = options?.rules ?? DEFAULT_PATTERN_RULES;
+    this.rules = options?.rules ?? [...DEFAULT_PATTERN_RULES];
     this.maxFiles = options?.maxFiles ?? MAX_FILES;
     this.maxFileSize = options?.maxFileSize ?? MAX_FILE_SIZE;
     this.skipExtensions = new Set([
       ...SKIP_EXTENSIONS,
       ...(options?.skipExtensions ?? []),
     ]);
+
+    if (options?.rulesDir) {
+      this.loadCustomRules(options.rulesDir);
+    }
+  }
+
+  private loadCustomRules(rulesDir: string): void {
+    if (!existsSync(rulesDir)) return;
+
+    try {
+      const entries = readdirSync(rulesDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        if (!entry.name.endsWith(".json")) continue;
+
+        const filePath = join(rulesDir, entry.name);
+        try {
+          const content = readFileSync(filePath, "utf-8");
+          const ruleDefs = JSON.parse(content) as PatternRuleDef[];
+
+          for (const def of ruleDefs) {
+            if (!def.id || !def.pattern || !def.message) {
+              logger.warn(`Skipping invalid rule in ${entry.name}: missing required fields`);
+              continue;
+            }
+
+            try {
+              const pattern = new RegExp(def.pattern, def.flags ?? "i");
+              this.rules.push({
+                id: def.id,
+                severity: def.severity ?? "medium",
+                pattern,
+                message: def.message,
+              });
+            } catch {
+              logger.warn(`Skipping invalid regex in ${entry.name}: ${def.id}`);
+            }
+          }
+        } catch {
+          logger.debug(`Failed to load rules from ${filePath}`);
+        }
+      }
+    } catch {
+      logger.debug(`Failed to read rules directory: ${rulesDir}`);
+    }
   }
 
   scanSkill(skillDir: string, skillName?: string): ScanResult {

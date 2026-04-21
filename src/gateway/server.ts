@@ -1,6 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { GatewayConfig } from "../config/schema.js";
 import type { LotteApp } from "../app.js";
 import type { PluginRegistry, PluginLoader } from "../plugins/index.js";
@@ -15,12 +18,15 @@ export interface GatewayDeps {
   config: GatewayConfig;
   pluginRegistry?: PluginRegistry;
   pluginLoader?: PluginLoader;
+  serveStatic?: boolean;
 }
 
 export interface GatewayContext {
   app: LotteApp;
   auth: AuthResult;
 }
+
+const API_PREFIXES = ["/api/", "/v1/", "/ws"];
 
 export class Gateway {
   private fastify: FastifyInstance;
@@ -83,18 +89,11 @@ export class Gateway {
       });
     });
 
-    this.fastify.setNotFoundHandler((request, reply) => {
-      reply.status(404).send({
-        ok: false,
-        error: {
-          code: "NOT_FOUND",
-          message: `Route not found: ${request.method} ${request.url}`,
-          details: null,
-        },
-      });
-    });
-
     registerRoutes(this.fastify, this.deps, this.eventEmitter);
+
+    if (this.deps.serveStatic) {
+      await this.registerStaticServing();
+    }
 
     this.wsManager = new WebSocketManager(this.deps, this.eventEmitter);
 
@@ -108,6 +107,10 @@ export class Gateway {
     this.running = true;
     logger.info(`Gateway started on http://${address}:${port}`);
     logger.info(`WebSocket available at ws://${address}:${port}/ws`);
+
+    if (this.deps.serveStatic) {
+      logger.info(`Web UI available at http://${address}:${port}`);
+    }
   }
 
   async stop(): Promise<void> {
@@ -139,5 +142,53 @@ export class Gateway {
 
   getAddress(): string {
     return `http://${this.deps.config.host}:${this.deps.config.port}`;
+  }
+
+  private async registerStaticServing(): Promise<void> {
+    const webDir = path.resolve(import.meta.dirname, "../../dist/web");
+
+    if (!fs.existsSync(webDir)) {
+      logger.warn(
+        `Web static directory not found: ${webDir}. Run 'pnpm build:web' first.`,
+      );
+      return;
+    }
+
+    await this.fastify.register(fastifyStatic, {
+      root: webDir,
+      prefix: "/",
+      decorateReply: false,
+      wildcard: false,
+    });
+
+    this.fastify.setNotFoundHandler((request, reply) => {
+      if (API_PREFIXES.some((prefix) => request.url.startsWith(prefix))) {
+        reply.status(404).send({
+          ok: false,
+          error: {
+            code: "NOT_FOUND",
+            message: `Route not found: ${request.method} ${request.url}`,
+            details: null,
+          },
+        });
+        return;
+      }
+
+      const indexPath = path.join(webDir, "index.html");
+      if (fs.existsSync(indexPath)) {
+        reply.type("text/html").send(fs.readFileSync(indexPath));
+      } else {
+        reply.status(404).send({
+          ok: false,
+          error: {
+            code: "NOT_FOUND",
+            message: "Web UI not available",
+            details: null,
+          },
+        });
+      }
+    });
+
+    logger.info(`Serving static web from: ${webDir}`);
   }
 }

@@ -47,6 +47,8 @@ interface ConnectedClient {
   ws: WebSocket;
   clientInfo: ClientInfo | null;
   authenticated: boolean;
+  handshakeCompleted: boolean;
+  challengeNonce: string | null;
   connectedAt: number;
   lastActivity: number;
 }
@@ -54,6 +56,8 @@ interface ConnectedClient {
 const MAX_PAYLOAD = 5 * 1024 * 1024;
 const TICK_INTERVAL_MS = 30000;
 const HEARTBEAT_TIMEOUT_MULTIPLIER = 2;
+const HANDSHAKE_TIMEOUT_MS = 10000;
+const CHALLENGE_NONCE_BYTES = 32;
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf-8");
@@ -120,10 +124,13 @@ export class WebSocketManager {
 
   private handleConnection(ws: WebSocket): void {
     const clientId = crypto.randomUUID();
+    const challengeNonce = crypto.randomBytes(CHALLENGE_NONCE_BYTES).toString("hex");
     const client: ConnectedClient = {
       ws,
       clientInfo: null,
       authenticated: false,
+      handshakeCompleted: false,
+      challengeNonce,
       connectedAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -131,21 +138,34 @@ export class WebSocketManager {
     this.clients.set(clientId, client);
     logger.info(`WebSocket client connected: ${clientId} (total: ${this.clients.size})`);
 
+    this.sendChallenge(clientId);
+
+    const handshakeTimeout = setTimeout(() => {
+      const c = this.clients.get(clientId);
+      if (c && !c.handshakeCompleted) {
+        logger.warn(`WebSocket handshake timeout: ${clientId}`);
+        c.ws.close(4003, "Handshake timeout");
+        this.clients.delete(clientId);
+      }
+    }, HANDSHAKE_TIMEOUT_MS);
+
     ws.on("message", (data: RawData) => {
       try {
         const message = JSON.parse(data.toString()) as GatewayFrame;
-        this.handleMessage(clientId, message);
+        this.handleMessage(clientId, message, handshakeTimeout);
       } catch {
         this.sendError(clientId, "", "PARSE_ERROR", "Invalid JSON message");
       }
     });
 
     ws.on("close", (code) => {
+      clearTimeout(handshakeTimeout);
       this.clients.delete(clientId);
       logger.info(`WebSocket client disconnected: ${clientId} (code: ${code}, total: ${this.clients.size})`);
     });
 
     ws.on("error", (error) => {
+      clearTimeout(handshakeTimeout);
       logger.error(`WebSocket client error (${clientId}): ${error.message}`);
       this.clients.delete(clientId);
     });
@@ -159,26 +179,47 @@ export class WebSocketManager {
     });
   }
 
-  private handleMessage(clientId: string, frame: GatewayFrame): void {
+  private handleMessage(clientId: string, frame: GatewayFrame, handshakeTimeout: ReturnType<typeof setTimeout>): void {
     const client = this.clients.get(clientId);
     if (!client) return;
 
     client.lastActivity = Date.now();
 
     if (frame.type === "req") {
-      void this.handleRequest(clientId, frame as RequestFrame);
+      void this.handleRequest(clientId, frame as RequestFrame, handshakeTimeout);
     }
   }
 
-  private async handleRequest(clientId: string, frame: RequestFrame): Promise<void> {
+  private async handleRequest(clientId: string, frame: RequestFrame, handshakeTimeout: ReturnType<typeof setTimeout>): Promise<void> {
     const { id, method, params } = frame;
 
+    if (method === "handshake") {
+      await this.handleHandshake(clientId, id, params as Record<string, unknown>, handshakeTimeout);
+      return;
+    }
+
     if (method === "connect") {
+      const client = this.clients.get(clientId);
+      if (!client?.handshakeCompleted) {
+        this.sendResponse(clientId, id, false, undefined, {
+          code: "HANDSHAKE_REQUIRED",
+          message: "Handshake required before authentication. Respond to the challenge first.",
+        });
+        return;
+      }
       await this.handleConnect(clientId, id, params as Record<string, unknown>);
       return;
     }
 
     const client = this.clients.get(clientId);
+    if (!client?.handshakeCompleted) {
+      this.sendResponse(clientId, id, false, undefined, {
+        code: "HANDSHAKE_REQUIRED",
+        message: "Handshake required. Respond to the challenge first.",
+      });
+      return;
+    }
+
     if (!client?.authenticated) {
       this.sendResponse(clientId, id, false, undefined, {
         code: "AUTH_REQUIRED",
@@ -197,6 +238,95 @@ export class WebSocketManager {
         message: msg,
       });
     }
+  }
+
+  private sendChallenge(clientId: string): void {
+    const client = this.clients.get(clientId);
+    if (!client || !client.challengeNonce) return;
+
+    this.seq++;
+    const frame: EventFrame = {
+      type: "event",
+      event: "challenge",
+      payload: {
+        nonce: client.challengeNonce,
+        algorithm: "hmac-sha256",
+        timeoutMs: HANDSHAKE_TIMEOUT_MS,
+      },
+      seq: this.seq,
+    };
+
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(JSON.stringify(frame));
+    }
+  }
+
+  private async handleHandshake(
+    clientId: string,
+    requestId: string,
+    params: Record<string, unknown>,
+    handshakeTimeout: ReturnType<typeof setTimeout>,
+  ): Promise<void> {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    if (client.handshakeCompleted) {
+      this.sendResponse(clientId, requestId, false, undefined, {
+        code: "ALREADY_HANDSHAKED",
+        message: "Handshake already completed",
+      });
+      return;
+    }
+
+    const response = params.response as string | undefined;
+    if (!response) {
+      this.sendResponse(clientId, requestId, false, undefined, {
+        code: "HANDSHAKE_FAILED",
+        message: "Missing 'response' field in handshake request",
+      });
+      client.ws.close(4002, "Handshake failed: missing response");
+      this.clients.delete(clientId);
+      return;
+    }
+
+    const authConfig = this.deps.config.auth;
+
+    if (authConfig.mode === "none") {
+      client.handshakeCompleted = true;
+      clearTimeout(handshakeTimeout);
+      this.sendResponse(clientId, requestId, true, {
+        status: "ok",
+        message: "Handshake completed (no auth required)",
+      });
+      return;
+    }
+
+    const expectedResponse = this.computeChallengeResponse(client.challengeNonce!, authConfig);
+
+    if (!safeEqual(response, expectedResponse)) {
+      this.sendResponse(clientId, requestId, false, undefined, {
+        code: "HANDSHAKE_FAILED",
+        message: "Invalid challenge response",
+      });
+      client.ws.close(4002, "Handshake failed: invalid response");
+      this.clients.delete(clientId);
+      return;
+    }
+
+    client.handshakeCompleted = true;
+    clearTimeout(handshakeTimeout);
+
+    this.sendResponse(clientId, requestId, true, {
+      status: "ok",
+      message: "Handshake completed successfully",
+    });
+
+    logger.info(`WebSocket client handshake completed: ${clientId}`);
+  }
+
+  private computeChallengeResponse(nonce: string, authConfig: AuthConfig): string {
+    const secret = authConfig.token ?? authConfig.password ?? "";
+    return crypto.createHmac("sha256", secret).update(nonce).digest("hex");
   }
 
   private async handleConnect(
@@ -262,6 +392,7 @@ export class WebSocketManager {
       },
       features: {
         methods: [
+          "handshake",
           "connect",
           "chat.send",
           "chat.abort",
@@ -278,6 +409,7 @@ export class WebSocketManager {
           "logs.tail",
         ],
         events: [
+          "challenge",
           "tick",
           "agent.message",
           "agent.done",

@@ -9,6 +9,8 @@ import type {
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
 import type { ChannelsConfig } from "../../config/schema.js";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 type FeishuConfig = ChannelsConfig["feishu"];
 
@@ -16,6 +18,7 @@ const FEISHU_PROCESSED_IDS_MAX = 2000;
 const WS_INITIAL_RETRY_DELAY = 1000;
 const WS_MAX_RETRY_DELAY = 60000;
 const WS_BACKOFF_FACTOR = 2;
+const MESSAGE_EXPIRY_MS = 5 * 60 * 1000;
 
 export class FeishuChannel extends BaseChannel {
   readonly channelType: ChannelType = "feishu";
@@ -29,6 +32,8 @@ export class FeishuChannel extends BaseChannel {
   private renderer: MessageRenderer;
   private processedIds: Set<string> = new Set();
   private receiveIdMap: Map<string, string> = new Map();
+  private receiveIdPath: string | null = null;
+  private receiveIdFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(process: ProcessHandler, config: FeishuConfig, onReplySent: OnReplySent = null) {
     super(process, onReplySent);
@@ -85,6 +90,8 @@ export class FeishuChannel extends BaseChannel {
   async start(): Promise<void> {
     this._status = "starting";
     try {
+      this.loadReceiveIdMap();
+      this.startReceiveIdFlush();
       await this.refreshTenantToken();
       await this.connectWebSocket();
       this._status = "running";
@@ -181,6 +188,15 @@ export class FeishuChannel extends BaseChannel {
       }
     }
 
+    const createTime = message.create_time as string | undefined;
+    if (createTime) {
+      const msgTime = parseInt(createTime, 10);
+      if (!isNaN(msgTime) && Date.now() - msgTime > MESSAGE_EXPIRY_MS) {
+        logger.debug(`Feishu: skipping expired message ${msgId} (age=${Math.round((Date.now() - msgTime) / 1000)}s)`);
+        return;
+      }
+    }
+
     const chatId = message.chat_id as string;
     const chatType = message.chat_type as string;
     const msgType = message.message_type as string;
@@ -274,6 +290,11 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async stop(): Promise<void> {
+    this.flushReceiveIdMap();
+    if (this.receiveIdFlushTimer) {
+      clearInterval(this.receiveIdFlushTimer);
+      this.receiveIdFlushTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -319,5 +340,51 @@ export class FeishuChannel extends BaseChannel {
   private extractChatId(handle: string): string {
     if (handle.startsWith("feishu:chat:")) return handle.slice("feishu:chat:".length);
     return this.receiveIdMap.get(handle) ?? handle;
+  }
+
+  setReceiveIdPath(dataDir: string): void {
+    this.receiveIdPath = join(dataDir, "feishu_receive_ids.json");
+  }
+
+  private loadReceiveIdMap(): void {
+    if (!this.receiveIdPath) return;
+    if (!existsSync(this.receiveIdPath)) return;
+
+    try {
+      const data = readFileSync(this.receiveIdPath, "utf-8");
+      const parsed = JSON.parse(data) as Record<string, string>;
+      for (const [key, value] of Object.entries(parsed)) {
+        this.receiveIdMap.set(key, value);
+      }
+      logger.debug(`Feishu: loaded ${this.receiveIdMap.size} receive_id mappings`);
+    } catch {
+      logger.debug("Feishu: failed to load receive_id mappings");
+    }
+  }
+
+  private flushReceiveIdMap(): void {
+    if (!this.receiveIdPath) return;
+    if (this.receiveIdMap.size === 0) return;
+
+    try {
+      const dir = join(this.receiveIdPath, "..");
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+
+      const data: Record<string, string> = {};
+      for (const [key, value] of this.receiveIdMap) {
+        data[key] = value;
+      }
+      writeFileSync(this.receiveIdPath, JSON.stringify(data, null, 2), "utf-8");
+    } catch {
+      logger.debug("Feishu: failed to flush receive_id mappings");
+    }
+  }
+
+  private startReceiveIdFlush(): void {
+    this.receiveIdFlushTimer = setInterval(() => {
+      this.flushReceiveIdMap();
+    }, 60000);
   }
 }

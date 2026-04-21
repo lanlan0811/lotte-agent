@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { LotteApp } from "../app.js";
+import { GatewayLauncher } from "./gateway-launcher.js";
 import { logger, type LogLevel } from "../utils/logger.js";
 import { resolveStateDir } from "../config/paths.js";
 import fs from "node:fs";
@@ -36,6 +37,36 @@ export function buildCLI(): Command {
         logger.info("Lotte Agent is running. Press Ctrl+C to stop.");
       } catch (error) {
         logger.error("Failed to start Lotte Agent", error);
+        process.exit(1);
+      }
+    });
+
+  program
+    .command("gateway")
+    .description("启动Lotte Gateway服务")
+    .option("--port <port>", "网关端口", parseInt)
+    .option("--host <host>", "网关主机")
+    .option("--web", "同时启动前端开发服务器（开发模式）")
+    .option("--prod", "生产模式（内嵌前端静态资源）")
+    .option("--web-port <port>", "前端开发服务器端口", parseInt)
+    .action(async (opts, cmd) => {
+      const globalOpts = cmd.optsWithGlobals();
+      applyGlobalOptions(globalOpts);
+
+      const launcher = new GatewayLauncher({
+        port: opts.port,
+        host: opts.host,
+        web: opts.web,
+        prod: opts.prod,
+        webPort: opts.webPort,
+        stateDir: globalOpts.stateDir as string | undefined,
+        logLevel: globalOpts.logLevel as string | undefined,
+      });
+
+      try {
+        await launcher.start();
+      } catch (error) {
+        logger.error("Failed to start Gateway", error);
         process.exit(1);
       }
     });
