@@ -21,9 +21,11 @@ export class RAGManager {
   private retriever: Retriever;
   private ragDir: string;
   private initialized = false;
+  private embeddingDimension: number;
 
   constructor(config: RAGConfig, aiConfig: AIConfig, database: Database, dataDir: string) {
     this.ragDir = path.join(dataDir, "rag");
+    this.embeddingDimension = config.embedding.dimension;
     this.store = new VectorStore(database.getDb());
     this.loader = new DocumentLoader();
     this.chunker = new DocumentChunker(config.chunk);
@@ -34,8 +36,9 @@ export class RAGManager {
 
   initialize(): void {
     ensureDir(this.ragDir);
+    this.store.ensureVecTable(this.embeddingDimension);
     this.initialized = true;
-    logger.info(`RAG manager initialized (dir: ${this.ragDir})`);
+    logger.info(`RAG manager initialized (dir: ${this.ragDir}, vec: ${this.store.isVecAvailable()})`);
   }
 
   async uploadDocument(filePath: string): Promise<RAGDocument> {

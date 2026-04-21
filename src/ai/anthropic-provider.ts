@@ -5,10 +5,34 @@ import type {
   ChatCompletionResponse,
   StreamCallback,
   ChatMessage,
+  ContentPart,
   ToolCall,
 } from "./types.js";
 import type { ProviderConfig } from "./types.js";
 import { logger } from "../utils/logger.js";
+
+function extractTextContent(content: string | ContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content.filter((p) => p.type === "text").map((p) => p.text).join("");
+}
+
+function extractAnthropicContentParts(content: string | ContentPart[]): Anthropic.ContentBlockParam[] {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  return content.map((part): Anthropic.ContentBlockParam => {
+    if (part.type === "text") {
+      return { type: "text", text: part.text };
+    }
+    return {
+      type: "image" as const,
+      source: {
+        type: "url" as const,
+        url: part.image_url.url,
+      },
+    } as Anthropic.ImageBlockParam;
+  });
+}
 
 export class AnthropicProvider extends BaseProvider {
   readonly id = "anthropic";
@@ -157,7 +181,7 @@ export class AnthropicProvider extends BaseProvider {
 
     for (const msg of messages) {
       if (msg.role === "system") {
-        systemParts.push(msg.content);
+        systemParts.push(extractTextContent(msg.content));
       } else {
         otherMessages.push(msg);
       }
@@ -173,12 +197,18 @@ export class AnthropicProvider extends BaseProvider {
 
     for (const msg of messages) {
       if (msg.role === "user") {
-        result.push({ role: "user", content: msg.content });
+        const hasImageParts = typeof msg.content !== "string" && msg.content.some((p) => p.type === "image_url");
+        if (hasImageParts) {
+          result.push({ role: "user", content: extractAnthropicContentParts(msg.content) });
+        } else {
+          result.push({ role: "user", content: extractTextContent(msg.content) });
+        }
       } else if (msg.role === "assistant") {
         if (msg.tool_calls && msg.tool_calls.length > 0) {
           const content: Anthropic.TextBlockParam[] = [];
-          if (msg.content) {
-            content.push({ type: "text", text: msg.content });
+          const textContent = extractTextContent(msg.content);
+          if (textContent) {
+            content.push({ type: "text", text: textContent });
           }
           const toolUseBlocks: Anthropic.ToolUseBlockParam[] = msg.tool_calls.map((tc) => ({
             type: "tool_use" as const,
@@ -191,7 +221,7 @@ export class AnthropicProvider extends BaseProvider {
             content: [...content, ...toolUseBlocks],
           });
         } else {
-          result.push({ role: "assistant", content: msg.content });
+          result.push({ role: "assistant", content: extractTextContent(msg.content) });
         }
       } else if (msg.role === "tool") {
         result.push({
@@ -200,7 +230,7 @@ export class AnthropicProvider extends BaseProvider {
             {
               type: "tool_result",
               tool_use_id: msg.tool_call_id ?? "",
-              content: msg.content,
+              content: extractTextContent(msg.content),
             } as Anthropic.ToolResultBlockParam,
           ],
         });

@@ -185,16 +185,31 @@ export class OpenAIProvider extends BaseProvider {
   ): OpenAI.ChatCompletionMessageParam[] {
     return messages.map((msg) => {
       if (msg.role === "system") {
-        return { role: "system" as const, content: msg.content };
+        return { role: "system" as const, content: typeof msg.content === "string" ? msg.content : msg.content.map((p) => p.type === "text" ? p.text : "").join("") };
       }
       if (msg.role === "user") {
-        return { role: "user" as const, content: msg.content };
+        if (typeof msg.content === "string") {
+          return { role: "user" as const, content: msg.content };
+        }
+        const parts: OpenAI.ChatCompletionContentPart[] = msg.content.map((part) => {
+          if (part.type === "text") {
+            return { type: "text" as const, text: part.text };
+          }
+          return {
+            type: "image_url" as const,
+            image_url: {
+              url: part.image_url.url,
+              detail: part.image_url.detail ?? "auto",
+            },
+          };
+        });
+        return { role: "user" as const, content: parts };
       }
       if (msg.role === "assistant") {
         if (msg.tool_calls) {
           return {
             role: "assistant" as const,
-            content: msg.content,
+            content: typeof msg.content === "string" ? msg.content : msg.content.map((p) => p.type === "text" ? p.text : "").join(""),
             tool_calls: msg.tool_calls.map((tc) => ({
               id: tc.id,
               type: "function" as const,
@@ -205,16 +220,16 @@ export class OpenAIProvider extends BaseProvider {
             })),
           };
         }
-        return { role: "assistant" as const, content: msg.content };
+        return { role: "assistant" as const, content: typeof msg.content === "string" ? msg.content : msg.content.map((p) => p.type === "text" ? p.text : "").join("") };
       }
       if (msg.role === "tool") {
         return {
           role: "tool" as const,
-          content: msg.content,
+          content: typeof msg.content === "string" ? msg.content : msg.content.map((p) => p.type === "text" ? p.text : "").join(""),
           tool_call_id: msg.tool_call_id ?? "",
         };
       }
-      return { role: "user" as const, content: msg.content };
+      return { role: "user" as const, content: typeof msg.content === "string" ? msg.content : msg.content.map((p) => p.type === "text" ? p.text : "").join("") };
     });
   }
 

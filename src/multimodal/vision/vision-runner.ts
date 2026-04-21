@@ -1,5 +1,5 @@
 import type { ModelManager } from "../../ai/model-manager.js";
-import type { ChatMessage } from "../../ai/types.js";
+import type { ChatMessage, ContentPart } from "../../ai/types.js";
 import type { VisionConfig, ImageContent } from "../types.js";
 import { ImageLoader } from "./image-loader.js";
 import { logger } from "../../utils/logger.js";
@@ -30,14 +30,12 @@ export class VisionRunner {
         ? await this.imageLoader.loadFromUrl(imageSource)
         : await this.imageLoader.loadFromFile(imageSource);
 
-    void imageContent;
-
     const model = options?.model ?? this.modelManager.getDefaultModel();
 
     const messages: ChatMessage[] = [
       {
         role: "user",
-        content: prompt,
+        content: this.buildMultimodalContent(prompt, [imageContent]),
       },
     ];
 
@@ -58,10 +56,23 @@ export class VisionRunner {
   buildMultimodalMessage(prompt: string, images: ImageContent[]): ChatMessage {
     return {
       role: "user",
-      content: JSON.stringify({
-        text: prompt,
-        images: images.map((img) => img.image_url.url),
-      }),
+      content: this.buildMultimodalContent(prompt, images),
     };
+  }
+
+  private buildMultimodalContent(prompt: string, images: ImageContent[]): ContentPart[] {
+    const parts: ContentPart[] = [{ type: "text", text: prompt }];
+
+    for (const img of images) {
+      parts.push({
+        type: "image_url",
+        image_url: {
+          url: img.image_url.url,
+          detail: img.image_url.detail ?? "auto",
+        },
+      });
+    }
+
+    return parts;
   }
 }

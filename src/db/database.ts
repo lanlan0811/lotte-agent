@@ -3,7 +3,7 @@ import { logger } from "../utils/logger.js";
 import { ensureDir } from "../utils/fs.js";
 import path from "node:path";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const CREATE_META_TABLE = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -165,10 +165,25 @@ export class Database {
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("foreign_keys = ON");
 
+    this.loadVecExtension();
+
     this.createSchema();
     this.runMigrations();
 
     logger.info(`Database initialized at ${this.dbPath}`);
+  }
+
+  private loadVecExtension(): void {
+    try {
+      this.db!.loadExtension(
+        process.platform === "win32"
+          ? "sqlite_vec"
+          : "sqlite_vec",
+      );
+      logger.info("sqlite-vec extension loaded successfully");
+    } catch (error) {
+      logger.warn(`Failed to load sqlite-vec extension: ${error}. Vector search will use brute-force fallback.`);
+    }
   }
 
   getDb(): BetterSqlite3.Database {

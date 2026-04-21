@@ -1,6 +1,10 @@
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | ContentPart[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
@@ -95,3 +99,13 @@ export interface ProviderConfig {
 }
 
 export type StreamCallback = (chunk: ChatCompletionChunk) => void;
+
+export function extractTextContent(content: string | ContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content.filter((p) => p.type === "text").map((p) => p.text).join("");
+}
+
+export function contentLength(content: string | ContentPart[]): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((sum, p) => sum + (p.type === "text" ? p.text.length : 0), 0);
+}

@@ -4,10 +4,16 @@ import type {
   ChatCompletionResponse,
   StreamCallback,
   ChatMessage,
+  ContentPart,
   ToolCall,
 } from "./types.js";
 import type { ProviderConfig } from "./types.js";
 import { logger } from "../utils/logger.js";
+
+function extractTextContent(content: string | ContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content.filter((p) => p.type === "text").map((p) => p.text).join("");
+}
 
 interface GeminiContent {
   role: "user" | "model";
@@ -245,7 +251,7 @@ export class GeminiProvider extends BaseProvider {
         case "system":
           contents.push({
             role: "user",
-            parts: [{ text: `[System Instructions]\n${msg.content}` }],
+            parts: [{ text: `[System Instructions]\n${extractTextContent(msg.content)}` }],
           });
           contents.push({
             role: "model",
@@ -253,12 +259,38 @@ export class GeminiProvider extends BaseProvider {
           });
           break;
 
-        case "user":
-          contents.push({
-            role: "user",
-            parts: [{ text: msg.content }],
-          });
+        case "user": {
+          if (typeof msg.content !== "string" && msg.content.some((p) => p.type === "image_url")) {
+            const parts: GeminiContent["parts"] = [];
+            for (const part of msg.content) {
+              if (part.type === "text") {
+                parts.push({ text: part.text });
+              } else if (part.type === "image_url") {
+                const url = part.image_url.url;
+                if (url.startsWith("data:")) {
+                  const match = url.match(/^data:([^;]+);base64,(.+)$/);
+                  if (match) {
+                    parts.push({
+                      inlineData: {
+                        mimeType: match[1],
+                        data: match[2],
+                      },
+                    } as unknown as GeminiContent["parts"][number]);
+                  }
+                } else {
+                  parts.push({ text: `[Image URL: ${url}]` });
+                }
+              }
+            }
+            contents.push({ role: "user", parts });
+          } else {
+            contents.push({
+              role: "user",
+              parts: [{ text: extractTextContent(msg.content) }],
+            });
+          }
           break;
+        }
 
         case "assistant":
           if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -274,14 +306,14 @@ export class GeminiProvider extends BaseProvider {
           } else {
             contents.push({
               role: "model",
-              parts: [{ text: msg.content || "" }],
+              parts: [{ text: extractTextContent(msg.content) || "" }],
             });
           }
           break;
 
         case "tool":
           try {
-            const responseArgs = JSON.parse(msg.content);
+            const responseArgs = JSON.parse(extractTextContent(msg.content));
             contents.push({
               role: "user",
               parts: [{
@@ -297,7 +329,7 @@ export class GeminiProvider extends BaseProvider {
               parts: [{
                 functionResponse: {
                   name: msg.name || "unknown",
-                  response: { result: msg.content },
+                  response: { result: extractTextContent(msg.content) },
                 },
               }],
             });

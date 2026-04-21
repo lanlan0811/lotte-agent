@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../ai/types.js";
+import { contentLength } from "../ai/types.js";
 
 export interface MemoryMessage extends ChatMessage {
   id: string;
@@ -100,7 +101,7 @@ export class InMemoryMemory {
   estimateTokens(): number {
     let totalChars = 0;
     for (const msg of this.messages) {
-      totalChars += msg.content.length;
+      totalChars += contentLength(msg.content);
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
           totalChars += tc.function.name.length + tc.function.arguments.length;
@@ -173,7 +174,7 @@ export class InMemoryMemory {
   }
 
   private estimateMessageTokens(msg: MemoryMessage): number {
-    let chars = msg.content.length;
+    let chars = contentLength(msg.content);
     if (msg.tool_calls) {
       for (const tc of msg.tool_calls) {
         chars += tc.function.name.length + tc.function.arguments.length;

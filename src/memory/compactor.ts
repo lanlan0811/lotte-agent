@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../ai/types.js";
+import { contentLength } from "../ai/types.js";
 import type { ModelManager } from "../ai/model-manager.js";
 import { logger } from "../utils/logger.js";
 
@@ -227,7 +228,7 @@ PRIORITIZE recent context over older history.`,
   private estimateTokens(messages: ChatMessage[]): number {
     let totalChars = 0;
     for (const msg of messages) {
-      totalChars += msg.content.length;
+      totalChars += contentLength(msg.content);
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
           totalChars += tc.function.name.length + tc.function.arguments.length;

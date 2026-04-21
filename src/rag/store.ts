@@ -1,12 +1,60 @@
 import crypto from "node:crypto";
 import type BetterSqlite3 from "better-sqlite3";
 import type { RAGDocument, RAGChunk, RAGSearchResult } from "./types.js";
+import { logger } from "../utils/logger.js";
+
+const VEC_DIMENSION = 1536;
+
+function float32ArrayToBuffer(arr: Float32Array): Buffer {
+  return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength);
+}
+
+function numberArrayToFloat32Buffer(nums: number[]): Buffer {
+  return float32ArrayToBuffer(new Float32Array(nums));
+}
 
 export class VectorStore {
   private db: BetterSqlite3.Database;
+  private vecAvailable: boolean = false;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
+    this.detectVecAvailability();
+  }
+
+  private detectVecAvailability(): void {
+    try {
+      const row = this.db.prepare("SELECT vec_version() as version").get() as { version: string } | undefined;
+      if (row?.version) {
+        this.vecAvailable = true;
+        logger.info(`sqlite-vec available: v${row.version}`);
+      }
+    } catch {
+      this.vecAvailable = false;
+      logger.warn("sqlite-vec not available, falling back to brute-force cosine similarity");
+    }
+  }
+
+  isVecAvailable(): boolean {
+    return this.vecAvailable;
+  }
+
+  ensureVecTable(dimension: number): void {
+    if (!this.vecAvailable) return;
+
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_vec
+        USING vec0(
+          chunk_id TEXT PRIMARY KEY,
+          embedding float[${dimension}]
+        )
+      `);
+      logger.info(`rag_chunks_vec virtual table created (dimension=${dimension})`);
+    } catch (error) {
+      logger.warn(`Failed to create rag_chunks_vec table: ${error}`);
+      this.vecAvailable = false;
+    }
   }
 
   insertDocument(doc: RAGDocument): void {
@@ -41,6 +89,20 @@ export class VectorStore {
         chunk.end_offset,
         chunk.metadata_json ? JSON.stringify(chunk.metadata_json) : null,
       );
+
+    if (this.vecAvailable && chunk.embedding.length > 0) {
+      try {
+        const embeddingBuf = numberArrayToFloat32Buffer(chunk.embedding);
+        this.db
+          .prepare(
+            `INSERT OR REPLACE INTO rag_chunks_vec (chunk_id, embedding)
+             VALUES (?, ?)`,
+          )
+          .run(chunk.chunk_id, embeddingBuf);
+      } catch (error) {
+        logger.warn(`Failed to insert chunk ${chunk.chunk_id} into vec table: ${error}`);
+      }
+    }
   }
 
   insertChunks(chunks: RAGChunk[]): void {
@@ -70,10 +132,24 @@ export class VectorStore {
   }
 
   deleteDocument(docId: string): boolean {
+    const chunkIds = this.db
+      .prepare("SELECT chunk_id FROM rag_chunks WHERE doc_id = ?")
+      .all(docId) as Array<{ chunk_id: string }>;
+
+    const deleteVecChunks = this.db.prepare("DELETE FROM rag_chunks_vec WHERE chunk_id = ?");
     const deleteChunks = this.db.prepare("DELETE FROM rag_chunks WHERE doc_id = ?");
     const deleteDoc = this.db.prepare("DELETE FROM rag_documents WHERE doc_id = ?");
 
     const transaction = this.db.transaction(() => {
+      if (this.vecAvailable) {
+        for (const { chunk_id } of chunkIds) {
+          try {
+            deleteVecChunks.run(chunk_id);
+          } catch {
+            // skip vec table errors
+          }
+        }
+      }
       deleteChunks.run(docId);
       const result = deleteDoc.run(docId);
       return result.changes > 0;
@@ -105,6 +181,62 @@ export class VectorStore {
   }
 
   searchByVector(
+    queryEmbedding: number[],
+    topK: number,
+    minScore: number,
+  ): RAGSearchResult[] {
+    if (this.vecAvailable && queryEmbedding.length > 0) {
+      return this.searchByVectorIndex(queryEmbedding, topK, minScore);
+    }
+    return this.searchByVectorBruteForce(queryEmbedding, topK, minScore);
+  }
+
+  private searchByVectorIndex(
+    queryEmbedding: number[],
+    topK: number,
+    minScore: number,
+  ): RAGSearchResult[] {
+    try {
+      const queryBuf = numberArrayToFloat32Buffer(queryEmbedding);
+
+      const rows = this.db
+        .prepare(
+          `SELECT c.chunk_id, c.doc_id, c.text, c.start_offset, c.end_offset, c.metadata_json,
+                  v.distance
+           FROM rag_chunks_vec v
+           JOIN rag_chunks c ON v.chunk_id = c.chunk_id
+           WHERE v.embedding MATCH ?
+           ORDER BY v.distance
+           LIMIT ?`,
+        )
+        .all(queryBuf, topK * 2) as Array<Record<string, unknown>>;
+
+      const results: RAGSearchResult[] = [];
+
+      for (const row of rows) {
+        const distance = row.distance as number;
+        const score = 1 - distance;
+
+        if (score < minScore) continue;
+
+        const chunk = this.rowToChunk(row);
+        results.push({ chunk, score });
+      }
+
+      const limited = results.slice(0, topK);
+
+      for (const result of limited) {
+        result.document = this.getDocument(result.chunk.doc_id);
+      }
+
+      return limited;
+    } catch (error) {
+      logger.warn(`sqlite-vec search failed, falling back to brute-force: ${error}`);
+      return this.searchByVectorBruteForce(queryEmbedding, topK, minScore);
+    }
+  }
+
+  private searchByVectorBruteForce(
     queryEmbedding: number[],
     topK: number,
     minScore: number,
@@ -149,6 +281,43 @@ export class VectorStore {
       .get() as { count: number } | undefined;
 
     return row?.count ?? 0;
+  }
+
+  rebuildVecIndex(dimension: number): void {
+    if (!this.vecAvailable) return;
+
+    try {
+      this.db.exec("DELETE FROM rag_chunks_vec");
+    } catch {
+      // table may not exist yet
+    }
+
+    this.ensureVecTable(dimension);
+
+    const rows = this.db
+      .prepare("SELECT chunk_id, embedding FROM rag_chunks")
+      .all() as Array<{ chunk_id: string; embedding: string }>;
+
+    const insertStmt = this.db.prepare(
+      "INSERT OR REPLACE INTO rag_chunks_vec (chunk_id, embedding) VALUES (?, ?)",
+    );
+
+    const transaction = this.db.transaction(() => {
+      for (const row of rows) {
+        try {
+          const embedding: number[] = JSON.parse(row.embedding);
+          if (embedding.length === dimension) {
+            const buf = numberArrayToFloat32Buffer(embedding);
+            insertStmt.run(row.chunk_id, buf);
+          }
+        } catch {
+          // skip malformed embeddings
+        }
+      }
+    });
+
+    transaction();
+    logger.info(`Rebuilt vec index with ${rows.length} chunks (dimension=${dimension})`);
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {

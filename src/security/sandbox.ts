@@ -1,4 +1,6 @@
 import vm from "node:vm";
+import acorn from "acorn";
+import type { Node, CallExpression, MemberExpression, Identifier, Literal } from "acorn";
 import { logger } from "../utils/logger.js";
 
 export interface SandboxConfig {
@@ -212,50 +214,207 @@ export class VMSandbox {
   validateCode(code: string): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
+    let ast: Node;
     try {
-      new vm.Script(code, { filename: "validate.js" });
+      ast = acorn.parse(code, {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        locations: true,
+      });
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
       return { valid: false, errors };
     }
 
-    const dangerousPatterns = [
-      { pattern: /process\s*\.\s*exit/, message: "process.exit() is not allowed" },
-      { pattern: /require\s*\(\s*['"]child_process['"]\s*\)/, message: "child_process module is not allowed" },
-      { pattern: /require\s*\(\s*['"]cluster['"]\s*\)/, message: "cluster module is not allowed" },
-    ];
+    const deniedModules = new Set(this.config.deniedModules);
 
     if (!this.config.allowFileSystem) {
-      dangerousPatterns.push({
-        pattern: /require\s*\(\s*['"]fs['"]\s*\)/,
-        message: "fs module is not allowed",
-      });
+      deniedModules.add("fs");
+      deniedModules.add("fs/promises");
     }
-
     if (!this.config.allowNetwork) {
-      dangerousPatterns.push(
-        {
-          pattern: /require\s*\(\s*['"]net['"]\s*\)/,
-          message: "net module is not allowed",
-        },
-        {
-          pattern: /require\s*\(\s*['"]http['"]\s*\)/,
-          message: "http module is not allowed",
-        },
-        {
-          pattern: /require\s*\(\s*['"]https['"]\s*\)/,
-          message: "https module is not allowed",
-        },
-      );
+      deniedModules.add("net");
+      deniedModules.add("http");
+      deniedModules.add("https");
+      deniedModules.add("dgram");
+    }
+    if (!this.config.allowChildProcess) {
+      deniedModules.add("child_process");
     }
 
-    for (const check of dangerousPatterns) {
-      if (check.pattern.test(code)) {
-        errors.push(check.message);
+    const deniedGlobalAccess = new Set<string>();
+    if (!this.config.allowFileSystem) {
+      deniedGlobalAccess.add("__dirname");
+      deniedGlobalAccess.add("__filename");
+    }
+
+    this.walkAST(ast, (node) => {
+      if (node.type === "CallExpression") {
+        const callExpr = node as CallExpression;
+
+        if (this.isProcessExit(callExpr)) {
+          errors.push(`process.exit() is not allowed (line ${callExpr.loc?.start.line})`);
+        }
+
+        if (this.isRequireDeniedModule(callExpr, deniedModules)) {
+          const moduleName = this.getRequireModuleName(callExpr);
+          errors.push(`require("${moduleName}") is not allowed (line ${callExpr.loc?.start.line})`);
+        }
+
+        if (this.isEvalCall(callExpr)) {
+          errors.push(`eval() is not allowed (line ${callExpr.loc?.start.line})`);
+        }
+
+        if (this.isFunctionConstructor(callExpr)) {
+          errors.push(`Function constructor is not allowed (line ${callExpr.loc?.start.line})`);
+        }
+      }
+
+      if (node.type === "MemberExpression") {
+        const memberExpr = node as MemberExpression;
+
+        if (this.isProcessAccess(memberExpr, ["exit", "kill", "send", "disconnect", "pid"])) {
+          const prop = this.getMemberProperty(memberExpr);
+          errors.push(`process.${prop} access is not allowed (line ${memberExpr.loc?.start.line})`);
+        }
+
+        if (this.isConstructorAccess(memberExpr)) {
+          errors.push(`Constructor access is not allowed (line ${memberExpr.loc?.start.line})`);
+        }
+      }
+
+      if (node.type === "Identifier") {
+        const ident = node as Identifier;
+        if (deniedGlobalAccess.has(ident.name)) {
+          errors.push(`${ident.name} access is not allowed (line ${ident.loc?.start.line})`);
+        }
+      }
+
+      if (node.type === "ImportDeclaration") {
+        const importDecl = node as unknown as { source: { value: string }; loc?: { start: { line: number } } };
+        const source = importDecl.source.value;
+        if (deniedModules.has(source)) {
+          errors.push(`import from "${source}" is not allowed (line ${importDecl.loc?.start.line})`);
+        }
+      }
+    });
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  private walkAST(node: Node, visitor: (node: Node) => void): void {
+    visitor(node);
+
+    for (const key of Object.keys(node)) {
+      const val = (node as Record<string, unknown>)[key];
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (item && typeof item === "object" && item.type) {
+            this.walkAST(item as Node, visitor);
+          }
+        }
+      } else if (val && typeof val === "object" && (val as Record<string, unknown>).type) {
+        this.walkAST(val as Node, visitor);
+      }
+    }
+  }
+
+  private isProcessExit(callExpr: CallExpression): boolean {
+    const callee = callExpr.callee;
+    if (callee.type !== "MemberExpression") return false;
+    return this.isProcessAccess(callee as MemberExpression, ["exit"]);
+  }
+
+  private isRequireDeniedModule(callExpr: CallExpression, deniedModules: Set<string>): boolean {
+    const callee = callExpr.callee;
+    if (callee.type === "Identifier" && callee.name === "require") {
+      const moduleName = this.getRequireModuleName(callExpr);
+      if (moduleName && deniedModules.has(moduleName)) {
+        return true;
       }
     }
 
-    return { valid: errors.length === 0, errors };
+    if (callee.type === "MemberExpression") {
+      const obj = callee.object;
+      const prop = callee.property;
+      if (
+        obj.type === "Identifier" && obj.name === "module" &&
+        prop.type === "Identifier" && prop.name === "require"
+      ) {
+        const moduleName = this.getRequireModuleName(callExpr);
+        if (moduleName && deniedModules.has(moduleName)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private getRequireModuleName(callExpr: CallExpression): string | null {
+    const args = callExpr.arguments;
+    if (args.length === 0) return null;
+
+    const firstArg = args[0];
+    if (firstArg.type === "Literal" && typeof firstArg.value === "string") {
+      return firstArg.value;
+    }
+
+    if (firstArg.type === "TemplateLiteral" && firstArg.quasis.length === 1) {
+      return firstArg.quasis[0]?.value.cooked ?? null;
+    }
+
+    return null;
+  }
+
+  private isEvalCall(callExpr: CallExpression): boolean {
+    const callee = callExpr.callee;
+    return callee.type === "Identifier" && callee.name === "eval";
+  }
+
+  private isFunctionConstructor(callExpr: CallExpression): boolean {
+    const callee = callExpr.callee;
+    if (callee.type !== "MemberExpression") return false;
+
+    const obj = callee.object;
+    const prop = callee.property;
+
+    if (obj.type === "Identifier" && obj.name === "Function" && prop.type === "Identifier") {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isProcessAccess(memberExpr: MemberExpression, properties: string[]): boolean {
+    const obj = memberExpr.object;
+    const prop = memberExpr.property;
+
+    if (obj.type === "Identifier" && obj.name === "process") {
+      if (prop.type === "Identifier" && properties.includes(prop.name)) {
+        return true;
+      }
+      if (prop.type === "Literal" && typeof prop.value === "string" && properties.includes(prop.value)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private getMemberProperty(memberExpr: MemberExpression): string {
+    const prop = memberExpr.property;
+    if (prop.type === "Identifier") return prop.name;
+    if (prop.type === "Literal" && typeof prop.value === "string") return prop.value;
+    return "unknown";
+  }
+
+  private isConstructorAccess(memberExpr: MemberExpression): boolean {
+    const prop = memberExpr.property;
+    if (prop.type === "Identifier" && prop.name === "constructor") {
+      return true;
+    }
+    return false;
   }
 
   private createSafeConsole(output: string[]): Record<string, (...args: unknown[]) => void> {

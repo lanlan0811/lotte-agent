@@ -2,6 +2,7 @@ import type { MemoryMessage } from "./short-term.js";
 import type { MemorySearchResult } from "./long-term.js";
 import { InMemoryMemory } from "./short-term.js";
 import { LongTermMemory } from "./long-term.js";
+import { extractTextContent } from "../ai/types.js";
 import { logger } from "../utils/logger.js";
 
 export interface MemoryManagerConfig {
@@ -76,7 +77,8 @@ export class MemoryManager {
     if (recent.length > 0) {
       parts.push("Recent conversation:");
       for (const msg of recent) {
-        const preview = msg.content.slice(0, 200);
+        const text = extractTextContent(msg.content);
+        const preview = text.slice(0, 200);
         parts.push(`[${msg.role}]: ${preview}`);
       }
     }
@@ -99,14 +101,15 @@ export class MemoryManager {
 
     const userMessages = messages.filter((m) => m.role === "user");
     const importantMessages = userMessages.filter(
-      (m) => m.content.length > 50,
+      (m) => extractTextContent(m.content).length > 50,
     );
 
     for (const msg of importantMessages.slice(0, 3)) {
-      const existing = this.longTerm.search(msg.content, { limit: 1 });
+      const text = extractTextContent(msg.content);
+      const existing = this.longTerm.search(text, { limit: 1 });
       if (existing.length > 0 && (existing[0]?.score ?? 0) > 5) continue;
 
-      this.longTerm.store(msg.content, {
+      this.longTerm.store(text, {
         tags: ["auto", "conversation"],
         source: "auto_store",
         importance: 0.3,
