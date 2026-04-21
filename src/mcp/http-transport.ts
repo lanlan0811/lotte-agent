@@ -49,10 +49,6 @@ export class StreamableHttpTransport extends MCPTransport {
   private _isConnected = false;
   private eventSource: EventSource | null = null;
   private sessionId: string | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
-  private reconnectBaseDelay = 2000;
-  private intentionallyClosed = false;
 
   constructor(config: MCPClientConfig) {
     super(config);
@@ -70,14 +66,11 @@ export class StreamableHttpTransport extends MCPTransport {
       throw new Error("streamable_http transport requires a url");
     }
 
-    this.intentionallyClosed = false;
     this._isConnected = true;
-    this.reconnectAttempts = 0;
     logger.info(`[MCP streamable_http] Connected: ${this.config.name} (${url})`);
   }
 
   override async close(): Promise<void> {
-    this.intentionallyClosed = true;
     this._isConnected = false;
 
     if (this.eventSource) {
@@ -245,11 +238,6 @@ export class SseTransport extends MCPTransport {
   private _isConnected = false;
   private eventSource: EventSource | null = null;
   private messageEndpoint: string | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
-  private reconnectBaseDelay = 2000;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private intentionallyClosed = false;
 
   constructor(config: MCPClientConfig) {
     super(config);
@@ -267,22 +255,14 @@ export class SseTransport extends MCPTransport {
       throw new Error("sse transport requires a url");
     }
 
-    this.intentionallyClosed = false;
     await this.initSseConnection();
 
     this._isConnected = true;
-    this.reconnectAttempts = 0;
     logger.info(`[MCP sse] Connected: ${this.config.name} (${url})`);
   }
 
   override async close(): Promise<void> {
-    this.intentionallyClosed = true;
     this._isConnected = false;
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
 
     if (this.eventSource) {
       this.eventSource.close();
@@ -363,6 +343,10 @@ export class SseTransport extends MCPTransport {
   private initSseConnection(): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = this.config.url!;
+      const headers: Record<string, string> = {};
+      for (const [key, value] of Object.entries(this.config.headers)) {
+        headers[key] = String(value);
+      }
 
       this.eventSource = new EventSource(url);
 
@@ -398,50 +382,10 @@ export class SseTransport extends MCPTransport {
         clearTimeout(timeout);
         if (!this._isConnected) {
           reject(new Error("SSE connection failed"));
-        } else {
-          this.handleSseDisconnect();
         }
         this.eventSource?.close();
       };
     });
-  }
-
-  private handleSseDisconnect(): void {
-    if (this.intentionallyClosed) return;
-
-    this._isConnected = false;
-
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.warn(
-        `[MCP sse:${this.config.name}] Max reconnect attempts (${this.maxReconnectAttempts}) reached`,
-      );
-      return;
-    }
-
-    this.reconnectAttempts++;
-    const delay = this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts - 1);
-
-    logger.info(
-      `[MCP sse:${this.config.name}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
-    );
-
-    this.reconnectTimer = setTimeout(async () => {
-      this.reconnectTimer = null;
-      try {
-        if (this.eventSource) {
-          this.eventSource.close();
-          this.eventSource = null;
-        }
-
-        await this.initSseConnection();
-        this._isConnected = true;
-        this.reconnectAttempts = 0;
-        logger.info(`[MCP sse:${this.config.name}] Reconnected successfully`);
-      } catch (error) {
-        logger.debug(`[MCP sse:${this.config.name}] Reconnect failed: ${error}`);
-        this.handleSseDisconnect();
-      }
-    }, delay);
   }
 
   private handleMessage(message: JsonRpcMessage): void {

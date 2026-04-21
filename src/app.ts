@@ -48,7 +48,6 @@ export class LotteApp {
   private toolPolicy: ToolPolicyPipeline | null = null;
   private approvalSystem: ApprovalSystem | null = null;
   private sandbox: VMSandbox | null = null;
-  private _serveStatic = false;
   private gateway: Gateway | null = null;
   private mcpManager: MCPClientManager | null = null;
   private mcpWatcher: MCPConfigWatcher | null = null;
@@ -241,9 +240,6 @@ export class LotteApp {
         },
         channelsConfig.feishu,
       );
-      if (this.config) {
-        feishuChannel.setReceiveIdPath(this.config.getPaths().dataDir);
-      }
       this.channelManager.register(feishuChannel);
     }
 
@@ -317,7 +313,6 @@ export class LotteApp {
       config: gatewayConfig,
       pluginRegistry: this.pluginRegistry,
       pluginLoader: this.pluginLoader,
-      serveStatic: this._serveStatic,
     });
     await this.gateway.start();
 
@@ -403,10 +398,6 @@ export class LotteApp {
 
   isRunning(): boolean {
     return this.running;
-  }
-
-  setServeStatic(value: boolean): void {
-    this._serveStatic = value;
   }
 
   getConfig(): ConfigLoader {
