@@ -1,6 +1,8 @@
 import type { MCPClientConfig, MCPConfig } from "../config/schema.js";
 import { StatefulMCPClient } from "./client.js";
-import type { MCPTool } from "./types.js";
+import { EnhancedStatefulClient } from "./stateful-client.js";
+import { RecoveryManager, type RecoveryPhase, type RecoveryConfig } from "./recovery.js";
+import { MCPStatefulClient, type MCPTool } from "./types.js";
 import { logger } from "../utils/logger.js";
 
 const CONNECT_TIMEOUT = 60_000;
@@ -30,7 +32,7 @@ const MAX_FAILURE_RECORDS = 100;
 
 export interface MCPClientEntry {
   key: string;
-  client: StatefulMCPClient;
+  client: MCPStatefulClient;
   status: "connecting" | "connected" | "disconnected" | "error";
   error?: string;
   connectedAt?: number;
@@ -38,10 +40,44 @@ export interface MCPClientEntry {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   circuitBreaker: CircuitBreakerState;
   toolFailureTracker: Map<string, FailureRecord[]>;
+  recoveryState?: RecoveryPhase;
 }
 
 export class MCPClientManager {
   private entries: Map<string, MCPClientEntry> = new Map();
+  private recoveryManager: RecoveryManager;
+  private useEnhancedRecovery: boolean;
+
+  constructor(opts?: { useEnhancedRecovery?: boolean; recoveryConfig?: Partial<RecoveryConfig> }) {
+    this.useEnhancedRecovery = opts?.useEnhancedRecovery ?? false;
+    this.recoveryManager = new RecoveryManager();
+    this.recoveryManager.setGlobalHandlers({
+      stateChanged: (oldState, newState, key) => {
+        const entry = this.entries.get(key);
+        if (entry) {
+          entry.recoveryState = newState;
+        }
+        logger.debug(`MCP client '${key}' recovery state: ${oldState} → ${newState}`);
+      },
+      recovered: (key) => {
+        const entry = this.entries.get(key);
+        if (entry) {
+          entry.status = "connected";
+          entry.connectedAt = Date.now();
+          entry.error = undefined;
+          entry.circuitBreaker = this.defaultCircuitBreaker();
+          entry.toolFailureTracker.clear();
+        }
+      },
+      failed: (key, error) => {
+        const entry = this.entries.get(key);
+        if (entry) {
+          entry.status = "error";
+          entry.error = error;
+        }
+      },
+    });
+  }
 
   private defaultCircuitBreaker(): CircuitBreakerState {
     return {
@@ -54,7 +90,7 @@ export class MCPClientManager {
     };
   }
 
-  private defaultEntry(key: string, client: StatefulMCPClient, status: MCPClientEntry["status"], error?: string): MCPClientEntry {
+  private defaultEntry(key: string, client: MCPStatefulClient, status: MCPClientEntry["status"], error?: string): MCPClientEntry {
     return {
       key,
       client,
@@ -88,6 +124,22 @@ export class MCPClientManager {
   }
 
   async addClient(key: string, config: MCPClientConfig): Promise<void> {
+    if (this.useEnhancedRecovery) {
+      try {
+        const client = await this.recoveryManager.addClient(key, config);
+        const entry = this.defaultEntry(key, client, "connected");
+        entry.connectedAt = Date.now();
+        entry.recoveryState = "healthy";
+        this.entries.set(key, entry);
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        const fallbackClient = new EnhancedStatefulClient(config);
+        this.entries.set(key, this.defaultEntry(key, fallbackClient, "error", msg));
+        throw error;
+      }
+    }
+
     const client = new StatefulMCPClient(config);
 
     this.entries.set(key, this.defaultEntry(key, client, "connecting"));
@@ -105,6 +157,28 @@ export class MCPClientManager {
   }
 
   async replaceClient(key: string, config: MCPClientConfig): Promise<void> {
+    if (this.useEnhancedRecovery) {
+      try {
+        await this.recoveryManager.removeClient(key);
+      } catch {
+        // Ignore removal errors
+      }
+
+      try {
+        const client = await this.recoveryManager.addClient(key, config);
+        const entry = this.defaultEntry(key, client, "connected");
+        entry.connectedAt = Date.now();
+        entry.recoveryState = "healthy";
+        this.entries.set(key, entry);
+        logger.info(`MCP client '${key}' replaced via recovery manager`);
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.warn(`MCP client '${key}' recovery replace failed: ${msg}`);
+        throw error;
+      }
+    }
+
     logger.debug(`Atomic hot-replacing MCP client: ${key}`);
 
     const newClient = new StatefulMCPClient(config);
@@ -157,6 +231,10 @@ export class MCPClientManager {
   }
 
   async removeClient(key: string): Promise<void> {
+    if (this.useEnhancedRecovery) {
+      await this.recoveryManager.removeClient(key);
+    }
+
     const entry = this.entries.get(key);
     if (!entry) return;
 
@@ -175,6 +253,10 @@ export class MCPClientManager {
   }
 
   async closeAll(): Promise<void> {
+    if (this.useEnhancedRecovery) {
+      await this.recoveryManager.closeAll();
+    }
+
     const snapshot = [...this.entries.entries()];
     this.entries.clear();
 
@@ -283,7 +365,7 @@ export class MCPClientManager {
     return result;
   }
 
-  getConnectedClients(): StatefulMCPClient[] {
+  getConnectedClients(): MCPStatefulClient[] {
     return [...this.entries.values()]
       .filter((e) => e.status === "connected" && e.client.isConnected)
       .map((e) => e.client);
@@ -297,7 +379,7 @@ export class MCPClientManager {
     return this.entries.get(key);
   }
 
-  getClient(key: string): StatefulMCPClient | undefined {
+  getClient(key: string): MCPStatefulClient | undefined {
     return this.entries.get(key)?.client;
   }
 
@@ -438,6 +520,7 @@ export class MCPClientManager {
     error?: string;
     toolCount: number;
     connectedAt?: number;
+    recoveryState?: RecoveryPhase;
   }> {
     const result: Record<string, {
       status: string;
@@ -446,6 +529,7 @@ export class MCPClientManager {
       error?: string;
       toolCount: number;
       connectedAt?: number;
+      recoveryState?: RecoveryPhase;
     }> = {};
 
     for (const [key, entry] of this.entries) {
@@ -456,10 +540,23 @@ export class MCPClientManager {
         error: entry.error,
         toolCount: entry.client.getToolsSnapshot().length,
         connectedAt: entry.connectedAt,
+        recoveryState: entry.recoveryState,
       };
     }
 
     return result;
+  }
+
+  getRecoveryStatus(): Record<string, ReturnType<RecoveryManager["getStatus"]>[string]> {
+    return this.recoveryManager.getStatus();
+  }
+
+  async rebuildClient(key: string): Promise<void> {
+    if (this.useEnhancedRecovery) {
+      await this.recoveryManager.rebuildClient(key);
+      return;
+    }
+    await this.reconnectClient(key);
   }
 }
 

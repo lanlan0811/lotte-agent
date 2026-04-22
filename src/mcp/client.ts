@@ -221,19 +221,19 @@ export class StatefulMCPClient extends MCPStatefulClient {
     }
   }
 
-  getToolsSnapshot(): MCPTool[] {
+  override getToolsSnapshot(): MCPTool[] {
     return [...this._tools];
   }
 
-  getResourcesSnapshot(): MCPResource[] {
+  override getResourcesSnapshot(): MCPResource[] {
     return [...this._resources];
   }
 
-  getPromptsSnapshot(): MCPPrompt[] {
+  override getPromptsSnapshot(): MCPPrompt[] {
     return [...this._prompts];
   }
 
-  getConfig(): MCPClientConfig {
+  override getConfig(): MCPClientConfig {
     return { ...this.config };
   }
 
