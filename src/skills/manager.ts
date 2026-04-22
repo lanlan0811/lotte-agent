@@ -298,20 +298,6 @@ export class SkillManager {
     return result;
   }
 
-  private writeTree(dir: string, tree: Record<string, unknown>): void {
-    for (const [key, value] of Object.entries(tree)) {
-      const fullPath = join(dir, key);
-      if (typeof value === "string") {
-        writeFileSync(fullPath, value, "utf-8");
-      } else if (typeof value === "object" && value !== null) {
-        if (!existsSync(fullPath)) {
-          mkdirSync(fullPath, { recursive: true });
-        }
-        this.writeTree(fullPath, value as Record<string, unknown>);
-      }
-    }
-  }
-
   private writeTreeAtomic(dir: string, tree: Record<string, unknown>): void {
     for (const [key, value] of Object.entries(tree)) {
       const fullPath = join(dir, key);

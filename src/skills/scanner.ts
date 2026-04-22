@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname, relative } from "node:path";
 import type { ScanResult, ScanFinding, ScanSeverity } from "./types.js";
+import { getAllRules, getRulesByCategory, getRulesBySeverity, getRuleSetSummary } from "./scanner-rules/index.js";
+import type { SignatureRule, SignatureRuleCategory } from "./scanner-rules/index.js";
 import { logger } from "../utils/logger.js";
 
 const SKIP_EXTENSIONS = new Set([
@@ -22,7 +24,7 @@ interface PatternRule {
   message: string;
 }
 
-const DEFAULT_PATTERN_RULES: PatternRule[] = [
+const LEGACY_PATTERN_RULES: PatternRule[] = [
   {
     id: "dangerous-exec",
     severity: "critical",
@@ -73,25 +75,48 @@ const DEFAULT_PATTERN_RULES: PatternRule[] = [
   },
 ];
 
+export interface SkillScannerOptions {
+  rules?: PatternRule[];
+  maxFiles?: number;
+  maxFileSize?: number;
+  skipExtensions?: string[];
+  useSignatureRules?: boolean;
+  signatureCategories?: SignatureRuleCategory[];
+  minSeverity?: ScanSeverity;
+}
+
 export class SkillScanner {
   private rules: PatternRule[];
+  private signatureRules: SignatureRule[];
   private maxFiles: number;
   private maxFileSize: number;
   private skipExtensions: Set<string>;
+  private useSignatureRules: boolean;
 
-  constructor(options?: {
-    rules?: PatternRule[];
-    maxFiles?: number;
-    maxFileSize?: number;
-    skipExtensions?: string[];
-  }) {
-    this.rules = options?.rules ?? DEFAULT_PATTERN_RULES;
+  constructor(options?: SkillScannerOptions) {
+    this.rules = options?.rules ?? LEGACY_PATTERN_RULES;
     this.maxFiles = options?.maxFiles ?? MAX_FILES;
     this.maxFileSize = options?.maxFileSize ?? MAX_FILE_SIZE;
     this.skipExtensions = new Set([
       ...SKIP_EXTENSIONS,
       ...(options?.skipExtensions ?? []),
     ]);
+    this.useSignatureRules = options?.useSignatureRules ?? true;
+
+    if (this.useSignatureRules) {
+      if (options?.signatureCategories && options.signatureCategories.length > 0) {
+        this.signatureRules = [];
+        for (const category of options.signatureCategories) {
+          this.signatureRules.push(...getRulesByCategory(category));
+        }
+      } else if (options?.minSeverity) {
+        this.signatureRules = getRulesBySeverity(options.minSeverity);
+      } else {
+        this.signatureRules = getAllRules();
+      }
+    } else {
+      this.signatureRules = [];
+    }
   }
 
   scanSkill(skillDir: string, skillName?: string): ScanResult {
@@ -112,11 +137,45 @@ export class SkillScanner {
 
     const files = this.discoverFiles(dirPath);
     const findings: ScanFinding[] = [];
+    const analyzersUsed: string[] = [];
 
+    if (this.rules.length > 0) {
+      analyzersUsed.push("pattern");
+      this.scanWithPatternRules(files, dirPath, findings);
+    }
+
+    if (this.useSignatureRules && this.signatureRules.length > 0) {
+      analyzersUsed.push("signature");
+      this.scanWithSignatureRules(files, dirPath, findings);
+    }
+
+    const deduplicated = this.deduplicateFindings(findings);
+    const maxSeverity = this.computeMaxSeverity(deduplicated);
+    const elapsed = (Date.now() - startTime) / 1000;
+
+    const result: ScanResult = {
+      skillName: name,
+      isSafe: maxSeverity === "info" || maxSeverity === "low",
+      maxSeverity,
+      findings: deduplicated,
+      scanDurationSeconds: Math.round(elapsed * 1000) / 1000,
+      analyzersUsed,
+    };
+
+    logger.info(`Skill scan '${name}': ${deduplicated.length} finding(s), safe=${result.isSafe}, severity=${maxSeverity}`);
+
+    return result;
+  }
+
+  getSignatureRuleSummary(): Record<SignatureRuleCategory, number> {
+    return getRuleSetSummary();
+  }
+
+  private scanWithPatternRules(files: string[], baseDir: string, findings: ScanFinding[]): void {
     for (const filePath of files) {
       try {
         const content = readFileSync(filePath, "utf-8");
-        const relPath = relative(dirPath, filePath);
+        const relPath = relative(baseDir, filePath);
 
         for (const rule of this.rules) {
           const match = content.match(rule.pattern);
@@ -136,20 +195,45 @@ export class SkillScanner {
         // Skip files that can't be read
       }
     }
+  }
 
-    const maxSeverity = this.computeMaxSeverity(findings);
-    const elapsed = (Date.now() - startTime) / 1000;
+  private scanWithSignatureRules(files: string[], baseDir: string, findings: ScanFinding[]): void {
+    for (const filePath of files) {
+      try {
+        const content = readFileSync(filePath, "utf-8");
+        const relPath = relative(baseDir, filePath);
 
-    const result: ScanResult = {
-      skillName: name,
-      isSafe: maxSeverity === "info" || maxSeverity === "low",
-      maxSeverity,
-      findings,
-      scanDurationSeconds: Math.round(elapsed * 1000) / 1000,
-      analyzersUsed: ["pattern"],
-    };
+        for (const rule of this.signatureRules) {
+          const match = content.match(rule.pattern);
+          if (match) {
+            const lineNum = this.findLineNumber(content, match.index ?? 0);
+            findings.push({
+              id: `sig:${rule.category}:${rule.id}:${relPath}:${lineNum}`,
+              severity: rule.severity,
+              rule: `${rule.category}:${rule.id}`,
+              message: rule.message,
+              file: relPath,
+              line: lineNum,
+            });
+          }
+        }
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+  }
 
-    logger.info(`Skill scan '${name}': ${findings.length} finding(s), safe=${result.isSafe}, severity=${maxSeverity}`);
+  private deduplicateFindings(findings: ScanFinding[]): ScanFinding[] {
+    const seen = new Set<string>();
+    const result: ScanFinding[] = [];
+
+    for (const finding of findings) {
+      const key = `${finding.rule}:${finding.file}:${finding.line}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(finding);
+      }
+    }
 
     return result;
   }
