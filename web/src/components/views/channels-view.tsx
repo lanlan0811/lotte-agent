@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Radio, Play, Square, RotateCw, RefreshCw, Settings, Loader2, MessageSquare } from "lucide-react";
-import { useAppStore, type ChannelInfo } from "@/lib/store";
+import { useAppStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,16 @@ interface ChannelConfig {
   [key: string]: string | number | boolean;
 }
 
+interface ChannelItem {
+  channelType: string;
+  channelName: string;
+  status: string;
+  connectedAt: number | null;
+  messageCount: number;
+  error: string | null;
+  config?: Record<string, unknown>;
+}
+
 const channelTypeLabels: Record<string, string> = {
   wechat: t("channels.wechat"),
   qq: t("channels.qq"),
@@ -35,7 +45,7 @@ const channelTypeLabels: Record<string, string> = {
 
 export function ChannelsView() {
   const { channels, setChannels } = useAppStore();
-  const [configTarget, setConfigTarget] = useState<ChannelInfo | null>(null);
+  const [configTarget, setConfigTarget] = useState<ChannelItem | null>(null);
   const [configJson, setConfigJson] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -44,7 +54,7 @@ export function ChannelsView() {
   }, []);
 
   const loadChannels = useCallback(async () => {
-    const result = await apiClient.get<ChannelInfo[]>("/api/v1/channels");
+    const result = await apiClient.get<ChannelItem[]>("/api/v1/channels");
     if (result.ok && result.data) {
       setChannels(result.data);
     }
@@ -65,7 +75,7 @@ export function ChannelsView() {
     await loadChannels();
   };
 
-  const openConfig = (channel: ChannelInfo) => {
+  const openConfig = (channel: ChannelItem) => {
     setConfigTarget(channel);
     setConfigJson(JSON.stringify(channel.config || {}, null, 2));
   };
@@ -75,7 +85,7 @@ export function ChannelsView() {
     setSaving(true);
     try {
       const parsed = JSON.parse(configJson);
-      await apiClient.put(`/api/v1/channels/${configTarget.name}/config`, parsed);
+      await apiClient.put(`/api/v1/channels/${configTarget.channelName}/config`, parsed);
       await loadChannels();
       setConfigTarget(null);
     } catch {
@@ -136,14 +146,14 @@ export function ChannelsView() {
         <ScrollArea className="h-[calc(100vh-200px)]">
           <div className="grid gap-3 md:grid-cols-2">
             {channels.map((channel) => (
-              <Card key={channel.name}>
+              <Card key={channel.channelName}>
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
                       <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
                         <Radio className="h-3.5 w-3.5" />
                       </div>
-                      {channel.name}
+                      {channel.channelName}
                       <Badge variant="outline" className={`text-xs ${getStatusColor(channel.status)}`}>
                         {getStatusLabel(channel.status)}
                       </Badge>
@@ -154,22 +164,16 @@ export function ChannelsView() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <span className="text-muted-foreground">{t("channels.channelType")}:</span>{" "}
-                      <span className="font-medium">{channelTypeLabels[channel.type] || channel.type}</span>
+                      <span className="font-medium">{channelTypeLabels[channel.channelType] || channel.channelType}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground">{t("channels.messageCount")}:</span>{" "}
                       <span className="font-medium">{channel.messageCount ?? 0}</span>
                     </div>
-                    {channel.uptime && channel.status === "running" && (
+                    {channel.connectedAt && channel.status === "running" && (
                       <div>
                         <span className="text-muted-foreground">{t("channels.uptime")}:</span>{" "}
-                        <span className="font-medium">{formatUptime(channel.uptime)}</span>
-                      </div>
-                    )}
-                    {channel.lastMessage && (
-                      <div>
-                        <span className="text-muted-foreground">{t("channels.lastMessage")}:</span>{" "}
-                        <span className="font-medium">{new Date(channel.lastMessage).toLocaleTimeString()}</span>
+                        <span className="font-medium">{formatUptime(Date.now() - channel.connectedAt)}</span>
                       </div>
                     )}
                   </div>
@@ -180,7 +184,7 @@ export function ChannelsView() {
                         variant="outline"
                         size="sm"
                         className="h-7 text-xs gap-1"
-                        onClick={() => handleStop(channel.name)}
+                        onClick={() => handleStop(channel.channelName)}
                       >
                         <Square className="h-3 w-3" />
                         {t("channels.stop")}
@@ -189,7 +193,7 @@ export function ChannelsView() {
                       <Button
                         size="sm"
                         className="h-7 text-xs gap-1"
-                        onClick={() => handleStart(channel.name)}
+                        onClick={() => handleStart(channel.channelName)}
                       >
                         <Play className="h-3 w-3" />
                         {t("channels.start")}
@@ -199,7 +203,7 @@ export function ChannelsView() {
                       variant="outline"
                       size="sm"
                       className="h-7 text-xs gap-1"
-                      onClick={() => handleRestart(channel.name)}
+                      onClick={() => handleRestart(channel.channelName)}
                       disabled={channel.status !== "running"}
                     >
                       <RotateCw className="h-3 w-3" />
@@ -209,7 +213,7 @@ export function ChannelsView() {
                       variant="ghost"
                       size="sm"
                       className="h-7 text-xs gap-1 ml-auto"
-                      onClick={() => openConfig(channel)}
+                      onClick={() => openConfig(channel as unknown as ChannelItem)}
                     >
                       <Settings className="h-3 w-3" />
                       {t("channels.configure")}
@@ -230,9 +234,9 @@ export function ChannelsView() {
       <Dialog open={configTarget !== null} onOpenChange={(open) => !open && setConfigTarget(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{t("channels.configTitle")} - {configTarget?.name}</DialogTitle>
+            <DialogTitle>{t("channels.configTitle")} - {configTarget?.channelName}</DialogTitle>
             <DialogDescription>
-              {t("channels.channelType")}: {configTarget?.type}
+              {t("channels.channelType")}: {configTarget?.channelType}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

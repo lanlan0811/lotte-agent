@@ -1,263 +1,523 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Database, Upload, FileText, Search, Trash2, RefreshCw } from "lucide-react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import {
+  Database, Upload, Search, Trash2, RefreshCw, FileText, Eye,
+  Loader2, CheckSquare, Square, X,
+} from "lucide-react";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
-interface RAGDocument {
-  doc_id: string;
-  filename: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string | null;
-  chunk_count: number;
-  created_at: number;
-}
-
-interface RAGSearchResultItem {
-  chunk_id: string;
-  doc_id: string;
-  text: string;
-  score: number;
-  filename: string | null;
-  start_offset: number | null;
-  end_offset: number | null;
-}
-
-interface RAGStats {
-  documentCount: number;
+interface RagDocument {
+  id: string;
+  name: string;
+  size: number;
   chunkCount: number;
+  uploadedAt: number;
+  status: "ready" | "processing" | "error";
 }
 
-export function RAGView() {
-  const [documents, setDocuments] = useState<RAGDocument[]>([]);
-  const [stats, setStats] = useState<RAGStats>({ documentCount: 0, chunkCount: 0 });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<RAGSearchResultItem[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+interface SearchResult {
+  content: string;
+  score: number;
+  documentName: string;
+  chunkIndex: number;
+}
 
-  const loadDocuments = useCallback(async () => {
-    setIsLoading(true);
-    const res = await apiClient.get<{ documents: RAGDocument[]; total: number }>("/api/v1/rag/documents");
-    if (res.ok && res.data) {
-      setDocuments(res.data.documents);
-    }
-    const statsRes = await apiClient.get<RAGStats>("/api/v1/rag/stats");
-    if (statsRes.ok && statsRes.data) {
-      setStats(statsRes.data);
-    }
-    setIsLoading(false);
-  }, []);
+interface UploadProgress {
+  fileName: string;
+  progress: number;
+  status: "uploading" | "processing" | "done" | "error";
+}
+
+export function RagView() {
+  const [documents, setDocuments] = useState<RagDocument[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<RagDocument | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<RagDocument | null>(null);
+  const [previewContent, setPreviewContent] = useState<string>("");
+  const [uploadProgresses, setUploadProgresses] = useState<UploadProgress[]>([]);
+  const [stats, setStats] = useState({ documentCount: 0, chunkCount: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadDocuments();
-  }, [loadDocuments]);
+    loadStats();
+  }, []);
 
-  const handleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setIsUploading(true);
-
-    for (const file of Array.from(files)) {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      try {
-        const response = await fetch(`${apiClient.getBaseUrl()}/api/v1/rag/documents`, {
-          method: "POST",
-          body: formData,
-        });
-        const result = await response.json();
-        if (!result.ok) {
-          console.error(`Upload failed for ${file.name}: ${result.error?.message}`);
-        }
-      } catch (error) {
-        console.error(`Upload error for ${file.name}:`, error);
-      }
+  const loadDocuments = useCallback(async () => {
+    const result = await apiClient.get<RagDocument[]>("/api/v1/rag/documents");
+    if (result.ok && result.data) {
+      setDocuments(result.data);
     }
+  }, []);
 
-    setIsUploading(false);
-    loadDocuments();
-  };
-
-  const handleDelete = async (docId: string) => {
-    const res = await apiClient.delete(`/api/v1/rag/documents/${docId}`);
-    if (res.ok) {
-      loadDocuments();
+  const loadStats = useCallback(async () => {
+    const result = await apiClient.get<{ documentCount: number; chunkCount: number }>("/api/v1/rag/stats");
+    if (result.ok && result.data) {
+      setStats(result.data);
     }
-  };
+  }, []);
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
-    const res = await apiClient.post<{ results: RAGSearchResultItem[]; total: number }>("/api/v1/rag/search", {
+    const result = await apiClient.get<{ results: SearchResult[] }>("/api/v1/rag/search", {
       query: searchQuery,
-      top_k: 5,
-      min_score: 0.5,
     });
-    if (res.ok && res.data) {
-      setSearchResults(res.data.results);
+    if (result.ok && result.data) {
+      setSearchResults(result.data.results || []);
     } else {
       setSearchResults([]);
     }
     setIsSearching(false);
+  }, [searchQuery]);
+
+  const handleUpload = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    for (const file of fileArray) {
+      const progress: UploadProgress = {
+        fileName: file.name,
+        progress: 0,
+        status: "uploading",
+      };
+      setUploadProgresses((prev) => [...prev, progress]);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const xhr = new XMLHttpRequest();
+        await new Promise<void>((resolve, reject) => {
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+              const pct = Math.round((e.loaded / e.total) * 80);
+              setUploadProgresses((prev) =>
+                prev.map((p) => (p.fileName === file.name ? { ...p, progress: pct } : p)),
+              );
+            }
+          });
+          xhr.addEventListener("load", () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              setUploadProgresses((prev) =>
+                prev.map((p) =>
+                  p.fileName === file.name ? { ...p, progress: 90, status: "processing" } : p,
+                ),
+              );
+              resolve();
+            } else {
+              reject(new Error(`Upload failed: ${xhr.status}`));
+            }
+          });
+          xhr.addEventListener("error", () => reject(new Error("Upload error")));
+          xhr.open("POST", "/api/v1/rag/upload");
+          xhr.send(formData);
+        });
+
+        setUploadProgresses((prev) =>
+          prev.map((p) =>
+            p.fileName === file.name ? { ...p, progress: 100, status: "done" } : p,
+          ),
+        );
+      } catch {
+        setUploadProgresses((prev) =>
+          prev.map((p) =>
+            p.fileName === file.name ? { ...p, status: "error" } : p,
+          ),
+        );
+      }
+    }
+
+    await loadDocuments();
+    await loadStats();
+
+    setTimeout(() => {
+      setUploadProgresses((prev) => prev.filter((p) => p.status !== "done"));
+    }, 2000);
   };
 
-  const formatFileSize = (bytes: number): string => {
+  const handleDelete = async (doc: RagDocument) => {
+    await apiClient.delete(`/api/v1/rag/documents/${doc.id}`);
+    await loadDocuments();
+    await loadStats();
+    setDeleteTarget(null);
+  };
+
+  const handleBatchDelete = async () => {
+    for (const id of selectedIds) {
+      await apiClient.delete(`/api/v1/rag/documents/${id}`);
+    }
+    setSelectedIds(new Set());
+    await loadDocuments();
+    await loadStats();
+  };
+
+  const handlePreview = async (doc: RagDocument) => {
+    setPreviewDoc(doc);
+    const result = await apiClient.get<{ content: string }>(`/api/v1/rag/documents/${doc.id}/preview`);
+    if (result.ok && result.data) {
+      setPreviewContent(result.data.content || "");
+    } else {
+      setPreviewContent("");
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === documents.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(documents.map((d) => d.id)));
+    }
+  };
+
+  const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1048576).toFixed(1)} MB`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const formatDate = (timestamp: number): string => {
-    return new Date(timestamp).toLocaleString();
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleUpload(e.dataTransfer.files);
+    }
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("rag.title")}</h2>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">{t("rag.documentCount")}: {stats.documentCount}</Badge>
-          <Badge variant="secondary">{t("rag.chunkCount")}: {stats.chunkCount}</Badge>
-          <Button variant="outline" size="sm" onClick={loadDocuments}>
-            <RefreshCw className="h-3 w-3 mr-1" />
-            {t("common.refresh")}
-          </Button>
-        </div>
+        <Button onClick={() => { loadDocuments(); loadStats(); }} variant="outline" size="sm" className="gap-1.5">
+          <RefreshCw className="h-3.5 w-3.5" />
+          {t("common.refresh")}
+        </Button>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Upload className="h-4 w-4 text-muted-foreground" />
-              {t("rag.upload")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              className="border-2 border-dashed rounded-lg p-8 text-center text-muted-foreground cursor-pointer hover:border-primary/50 transition-colors"
+          <CardContent className="pt-4 pb-4 flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.documentCount}</p>
+              <p className="text-xs text-muted-foreground">{t("rag.documentCount")}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-4 flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-green-500/10 text-green-600">
+              <Database className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.chunkCount}</p>
+              <p className="text-xs text-muted-foreground">{t("rag.chunkCount")}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {uploadProgresses.length > 0 && (
+        <div className="space-y-2">
+          {uploadProgresses.map((up, idx) => (
+            <div key={idx} className="flex items-center gap-3 p-2 rounded-md border text-xs">
+              <span className="font-medium truncate max-w-[200px]">{up.fileName}</span>
+              <Progress value={up.progress} className="flex-1 h-2" />
+              <Badge
+                variant={
+                  up.status === "done" ? "default" :
+                  up.status === "error" ? "destructive" :
+                  "secondary"
+                }
+                className="text-xs"
+              >
+                {up.status === "uploading" ? t("rag.uploading") :
+                 up.status === "processing" ? t("rag.processing") :
+                 up.status === "done" ? t("common.success") :
+                 t("common.error")}
+              </Badge>
+              {up.status === "done" && (
+                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => {
+                  setUploadProgresses((prev) => prev.filter((_, i) => i !== idx));
+                }}>
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Tabs defaultValue="documents">
+        <TabsList>
+          <TabsTrigger value="documents">
+            {t("rag.documents")} ({documents.length})
+          </TabsTrigger>
+          <TabsTrigger value="search">{t("rag.search")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="documents" className="space-y-4 mt-4">
+          <div
+            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+              isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t("rag.dragDrop")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("rag.supportedFormats")}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3 gap-1.5"
               onClick={() => fileInputRef.current?.click()}
             >
-              <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">{t("rag.dragDrop")}</p>
-              <p className="text-xs mt-1">{t("rag.supportedFormats")}</p>
-              <Button variant="outline" size="sm" className="mt-3" disabled={isUploading}>
-                {isUploading ? t("common.loading") : t("rag.browseFiles")}
-              </Button>
-            </div>
+              <Upload className="h-3.5 w-3.5" />
+              {t("rag.browseFiles")}
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
-              className="hidden"
               multiple
               accept=".pdf,.txt,.md,.json,.csv"
-              onChange={(e) => handleUpload(e.target.files)}
+              className="hidden"
+              onChange={(e) => e.target.files && handleUpload(e.target.files)}
             />
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              {t("rag.search")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex gap-2">
-              <Input
-                placeholder={t("rag.searchPlaceholder")}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              />
-              <Button size="sm" onClick={handleSearch} disabled={isSearching}>
-                <Search className="h-4 w-4" />
-              </Button>
+          {documents.length > 0 && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={toggleSelectAll}>
+                  {selectedIds.size === documents.length ? (
+                    <CheckSquare className="h-3.5 w-3.5" />
+                  ) : (
+                    <Square className="h-3.5 w-3.5" />
+                  )}
+                  {selectedIds.size === documents.length ? t("rag.deselectAll") : t("rag.selectAll")}
+                </Button>
+                {selectedIds.size > 0 && (
+                  <>
+                    <Badge variant="secondary" className="text-xs">
+                      {t("rag.selected")}: {selectedIds.size}
+                    </Badge>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={handleBatchDelete}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t("rag.batchDelete")}
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
-            {searchResults.length > 0 && (
-              <ScrollArea className="h-64">
-                <div className="space-y-3">
-                  {searchResults.map((result) => (
-                    <div key={result.chunk_id} className="border rounded-md p-3 text-sm">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-muted-foreground">
-                          {result.filename || "unknown"}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          {t("rag.score")}: {result.score.toFixed(4)}
-                        </Badge>
-                      </div>
-                      <p className="text-sm leading-relaxed line-clamp-4">{result.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-            {searchResults.length === 0 && searchQuery && !isSearching && (
-              <p className="text-center text-sm text-muted-foreground py-4">{t("rag.noResults")}</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          )}
 
-      <Separator />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Database className="h-4 w-4 text-muted-foreground" />
-            {t("rag.documents")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-8 text-muted-foreground">{t("common.loading")}</div>
-          ) : documents.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">{t("common.noData")}</div>
-          ) : (
-            <ScrollArea className="max-h-96">
+          {documents.length > 0 ? (
+            <ScrollArea className="h-[calc(100vh-520px)]">
               <div className="space-y-2">
                 {documents.map((doc) => (
                   <div
-                    key={doc.doc_id}
-                    className="flex items-center justify-between border rounded-md p-3 hover:bg-accent/50 transition-colors"
+                    key={doc.id}
+                    className="flex items-center gap-3 p-3 rounded-md border hover:bg-muted/30 transition-colors"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{doc.filename}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatFileSize(doc.file_size)} · {doc.chunk_count} chunks · {formatDate(doc.created_at)}
-                        </p>
+                    <button
+                      className="shrink-0"
+                      onClick={() => toggleSelect(doc.id)}
+                    >
+                      {selectedIds.has(doc.id) ? (
+                        <CheckSquare className="h-4 w-4 text-primary" />
+                      ) : (
+                        <Square className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </button>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        <span>{formatSize(doc.size)}</span>
+                        <span>·</span>
+                        <span>{doc.chunkCount} {t("rag.chunkCount")}</span>
+                        <span>·</span>
+                        <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(doc.doc_id)}
+                    <Badge
+                      variant={doc.status === "ready" ? "default" : doc.status === "processing" ? "secondary" : "destructive"}
+                      className="text-xs"
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      {doc.status}
+                    </Badge>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handlePreview(doc)}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteTarget(doc)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
             </ScrollArea>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>{t("common.noData")}</p>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        <TabsContent value="search" className="space-y-4 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                placeholder={t("rag.searchPlaceholder")}
+                className="pl-8 h-8 text-sm"
+              />
+            </div>
+            <Button size="sm" onClick={handleSearch} disabled={isSearching}>
+              {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {searchResults.length > 0 ? (
+            <ScrollArea className="h-[calc(100vh-360px)]">
+              <div className="space-y-3">
+                {searchResults.map((result, idx) => (
+                  <Card key={idx}>
+                    <CardContent className="pt-3 pb-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium">{result.documentName}</span>
+                          <Badge variant="secondary" className="text-xs">#{result.chunkIndex}</Badge>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {t("rag.score")}: {(result.score * 100).toFixed(1)}%
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-4">{result.content}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : searchQuery && !isSearching ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>{t("rag.noResults")}</p>
+            </div>
+          ) : null}
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("common.confirmDelete")}</DialogTitle>
+            <DialogDescription>{t("rag.deleteConfirm")}</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm font-medium">{deleteTarget?.name}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {formatSize(deleteTarget?.size || 0)} · {deleteTarget?.chunkCount} {t("rag.chunkCount")}
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={() => deleteTarget && handleDelete(deleteTarget)}>
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={previewDoc !== null} onOpenChange={(open) => !open && setPreviewDoc(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("rag.preview")} - {previewDoc?.name}</DialogTitle>
+            <DialogDescription>
+              {formatSize(previewDoc?.size || 0)} · {previewDoc?.chunkCount} {t("rag.chunkCount")}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[400px]">
+            <pre className="text-xs font-mono whitespace-pre-wrap break-all p-2 bg-muted rounded-md">
+              {previewContent || t("common.noData")}
+            </pre>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewDoc(null)}>
+              {t("common.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

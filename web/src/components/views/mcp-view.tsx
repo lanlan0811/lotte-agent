@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Plug, Plus, Trash2, RefreshCw, Settings, Wrench, Loader2, ChevronDown, ChevronRight } from "lucide-react";
-import { useAppStore, type McpClientInfo } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -35,6 +34,19 @@ interface McpTool {
   inputSchema?: Record<string, unknown>;
 }
 
+interface McpClientItem {
+  name: string;
+  transport: string;
+  status: string;
+  toolsCount: number;
+  error: string | null;
+  command?: string;
+  url?: string;
+  args?: string | string[];
+  headers?: Record<string, string>;
+  lastConnected?: number;
+}
+
 interface EditForm {
   name: string;
   transport: "stdio" | "sse";
@@ -54,13 +66,13 @@ const emptyForm: EditForm = {
 };
 
 export function McpView() {
-  const { mcpClients, setMcpClients } = useAppStore();
+  const [clients, setClients] = useState<McpClientItem[]>([]);
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [clientTools, setClientTools] = useState<Record<string, McpTool[]>>({});
   const [loadingTools, setLoadingTools] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editForm, setEditForm] = useState<EditForm>(emptyForm);
-  const [removeTarget, setRemoveTarget] = useState<McpClientInfo | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<McpClientItem | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -68,11 +80,11 @@ export function McpView() {
   }, []);
 
   const loadClients = useCallback(async () => {
-    const result = await apiClient.get<McpClientInfo[]>("/api/v1/mcp/clients");
+    const result = await apiClient.get<McpClientItem[]>("/api/v1/mcp/clients");
     if (result.ok && result.data) {
-      setMcpClients(result.data);
+      setClients(result.data);
     }
-  }, [setMcpClients]);
+  }, []);
 
   const loadTools = useCallback(async (clientName: string) => {
     setLoadingTools(clientName);
@@ -127,7 +139,7 @@ export function McpView() {
     setSaving(false);
   };
 
-  const handleRemove = async (client: McpClientInfo) => {
+  const handleRemove = async (client: McpClientItem) => {
     await apiClient.delete(`/api/v1/mcp/clients/${client.name}`);
     await loadClients();
     setRemoveTarget(null);
@@ -180,10 +192,10 @@ export function McpView() {
         </div>
       </div>
 
-      {mcpClients.length > 0 ? (
+      {clients.length > 0 ? (
         <ScrollArea className="h-[calc(100vh-200px)]">
           <div className="space-y-3">
-            {mcpClients.map((client) => {
+            {clients.map((client) => {
               const isExpanded = expandedClient === client.name;
               const tools = clientTools[client.name] || [];
               return (

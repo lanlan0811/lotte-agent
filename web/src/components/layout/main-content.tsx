@@ -5,24 +5,24 @@ import { useAppStore } from "@/lib/store";
 import { ChatView } from "@/components/views/chat-view";
 import { SessionsView } from "@/components/views/sessions-view";
 import { SkillsView } from "@/components/views/skills-view";
-import { MCPView } from "@/components/views/mcp-view";
+import { McpView } from "@/components/views/mcp-view";
 import { ChannelsView } from "@/components/views/channels-view";
 import { AutomationView } from "@/components/views/automation-view";
 import { LogsView } from "@/components/views/logs-view";
 import { ConfigView } from "@/components/views/config-view";
-import { RAGView } from "@/components/views/rag-view";
+import { RagView } from "@/components/views/rag-view";
 import { NotificationView } from "@/components/views/notification-view";
 
 const viewMap: Record<string, React.ComponentType> = {
   chat: ChatView,
   sessions: SessionsView,
   skills: SkillsView,
-  mcp: MCPView,
+  mcp: McpView,
   channels: ChannelsView,
   automation: AutomationView,
   logs: LogsView,
   config: ConfigView,
-  rag: RAGView,
+  rag: RagView,
   notification: NotificationView,
 };
 

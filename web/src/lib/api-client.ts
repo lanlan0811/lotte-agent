@@ -105,8 +105,16 @@ export class ApiClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async get<T>(path: string): Promise<ApiResponse<T>> {
-    return this.request<T>(path, { method: "GET" });
+  async get<T>(path: string, params?: Record<string, string | number>): Promise<ApiResponse<T>> {
+    let url = path;
+    if (params) {
+      const qs = Object.entries(params)
+        .filter(([, v]) => v !== undefined && v !== null && v !== "")
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .join("&");
+      if (qs) url = `${path}?${qs}`;
+    }
+    return this.request<T>(url, { method: "GET" });
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {

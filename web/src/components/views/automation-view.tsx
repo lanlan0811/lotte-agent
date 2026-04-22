@@ -5,7 +5,7 @@ import {
   Clock, Play, Plus, Trash2, RefreshCw, Loader2, Zap, Workflow,
   ChevronDown, ChevronRight, AlertTriangle,
 } from "lucide-react";
-import { useAppStore, type CronJobInfo } from "@/lib/store";
+import { useAppStore, type CronJob } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,7 @@ export function AutomationView() {
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [showJobDialog, setShowJobDialog] = useState(false);
   const [jobForm, setJobForm] = useState<JobForm>(emptyJobForm);
-  const [deleteTarget, setDeleteTarget] = useState<CronJobInfo | TriggerInfo | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CronJob | TriggerInfo | null>(null);
   const [deleteType, setDeleteType] = useState<"job" | "trigger">("job");
   const [saving, setSaving] = useState(false);
 
@@ -88,7 +88,7 @@ export function AutomationView() {
   }, []);
 
   const loadJobs = useCallback(async () => {
-    const result = await apiClient.get<CronJobInfo[]>("/api/v1/automation/cron");
+    const result = await apiClient.get<CronJob[]>("/api/v1/automation/cron");
     if (result.ok && result.data) {
       setCronJobs(result.data);
     }
@@ -138,7 +138,7 @@ export function AutomationView() {
     await apiClient.post(`/api/v1/automation/cron/${id}/run`);
   };
 
-  const handleToggleJob = async (job: CronJobInfo) => {
+  const handleToggleJob = async (job: CronJob) => {
     if (job.enabled) {
       await apiClient.post(`/api/v1/automation/cron/${job.id}/disable`);
     } else {
@@ -147,7 +147,7 @@ export function AutomationView() {
     setCronJobs(cronJobs.map((j) => (j.id === job.id ? { ...j, enabled: !j.enabled } : j)));
   };
 
-  const handleDeleteJob = async (job: CronJobInfo) => {
+  const handleDeleteJob = async (job: CronJob) => {
     await apiClient.delete(`/api/v1/automation/cron/${job.id}`);
     await loadJobs();
     setDeleteTarget(null);
@@ -213,10 +213,10 @@ export function AutomationView() {
                           <Badge variant={job.enabled ? "default" : "secondary"}>
                             {job.enabled ? t("common.enabled") : t("common.disabled")}
                           </Badge>
-                          {(job.consecutiveErrors ?? 0) > 0 && (
+                          {(job.state?.consecutiveErrors ?? 0) > 0 && (
                             <Badge variant="destructive" className="text-xs gap-1">
                               <AlertTriangle className="h-3 w-3" />
-                              {job.consecutiveErrors}
+                              {job.state?.consecutiveErrors}
                             </Badge>
                           )}
                         </CardTitle>
@@ -249,24 +249,29 @@ export function AutomationView() {
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
                           <span className="text-muted-foreground">{t("automation.schedule")}:</span>{" "}
-                          <code className="bg-muted px-1.5 py-0.5 rounded">{job.schedule}</code>
+                          <code className="bg-muted px-1.5 py-0.5 rounded">
+                            {job.schedule.kind === "cron" ? job.schedule.expr :
+                             job.schedule.kind === "interval" ? `every ${job.schedule.everyMs}ms` :
+                             job.schedule.kind === "timestamp" ? new Date(job.schedule.at || 0).toLocaleString() :
+                             job.schedule.kind}
+                          </code>
                         </div>
                         <div>
                           <span className="text-muted-foreground">{t("automation.nextRun")}:</span>{" "}
-                          {job.nextRun ? formatTime(job.nextRun) : "-"}
+                          {job.state?.nextRunAt ? formatTime(job.state.nextRunAt) : "-"}
                         </div>
                         <div>
                           <span className="text-muted-foreground">{t("automation.lastRun")}:</span>{" "}
-                          {job.lastRun ? formatTime(job.lastRun) : "-"}
+                          {job.state?.lastRunAt ? formatTime(job.state.lastRunAt) : "-"}
                         </div>
-                        {job.lastStatus && (
+                        {job.state?.lastRunStatus && (
                           <div>
                             <span className="text-muted-foreground">{t("automation.lastStatus")}:</span>{" "}
                             <Badge
-                              variant={job.lastStatus === "success" ? "default" : "destructive"}
+                              variant={job.state.lastRunStatus === "success" ? "default" : "destructive"}
                               className="text-xs"
                             >
-                              {job.lastStatus}
+                              {job.state.lastRunStatus}
                             </Badge>
                           </div>
                         )}
@@ -496,7 +501,7 @@ export function AutomationView() {
           </DialogHeader>
           <div className="py-2">
             <p className="text-sm font-medium">
-              {deleteTarget?.name || (deleteTarget as CronJobInfo)?.id}
+              {deleteTarget?.name || (deleteTarget as CronJob)?.id}
             </p>
           </div>
           <DialogFooter className="gap-2">
@@ -507,7 +512,7 @@ export function AutomationView() {
               variant="destructive"
               onClick={() => {
                 if (deleteType === "job" && deleteTarget) {
-                  handleDeleteJob(deleteTarget as CronJobInfo);
+                  handleDeleteJob(deleteTarget as CronJob);
                 } else if (deleteTarget) {
                   handleDeleteTrigger(deleteTarget as TriggerInfo);
                 }
