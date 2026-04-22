@@ -2,8 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import http from "node:http";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { MediaConfig, MediaFile } from "../types.js";
 import { logger } from "../../utils/logger.js";
+
+const MAX_MEDIA_ID_CHARS = 200;
+const MEDIA_ID_PATTERN = /^[\p{L}\p{N}._-]+$/u;
+const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+
+function isValidMediaId(id: string): boolean {
+  if (!id || id === "." || id === "..") return false;
+  if (id.length > MAX_MEDIA_ID_CHARS) return false;
+  return MEDIA_ID_PATTERN.test(id);
+}
 
 export class MediaStore {
   private storageDir: string;
@@ -49,20 +60,46 @@ export class MediaStore {
   }
 
   get(id: string): Buffer | null {
+    if (!isValidMediaId(id)) return null;
+
     const mediaFile = this.files.get(id);
     if (!mediaFile) return null;
 
+    if (this.isExpired(mediaFile)) {
+      this.delete(id);
+      return null;
+    }
+
     const filePath = path.join(this.storageDir, mediaFile.filename);
-    if (!fs.existsSync(filePath)) {
+    const realPath = this.resolveSafePath(filePath);
+    if (!realPath) return null;
+
+    if (!fs.existsSync(realPath)) {
       this.files.delete(id);
       return null;
     }
 
-    return fs.readFileSync(filePath);
+    const stat = fs.statSync(realPath);
+    if (stat.size > MAX_MEDIA_BYTES) {
+      logger.warn(`Media file too large: ${id} (${stat.size} bytes)`);
+      return null;
+    }
+
+    return fs.readFileSync(realPath);
   }
 
   getMetadata(id: string): MediaFile | undefined {
-    return this.files.get(id);
+    if (!isValidMediaId(id)) return undefined;
+    const meta = this.files.get(id);
+    if (meta && this.isExpired(meta)) {
+      this.delete(id);
+      return undefined;
+    }
+    return meta;
+  }
+
+  isExpired(file: MediaFile): boolean {
+    return Date.now() - file.createdAt > file.ttl * 1000;
   }
 
   delete(id: string): boolean {
@@ -86,10 +123,27 @@ export class MediaStore {
     return Array.from(this.files.values());
   }
 
+  getStorageDir(): string {
+    return this.storageDir;
+  }
+
   shutdown(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
+    }
+  }
+
+  resolveSafePath(filePath: string): string | null {
+    try {
+      const realPath = fs.realpathSync(filePath);
+      if (!realPath.startsWith(this.storageDir)) {
+        logger.warn(`Path traversal attempt blocked: ${filePath}`);
+        return null;
+      }
+      return realPath;
+    } catch {
+      return null;
     }
   }
 
@@ -159,6 +213,63 @@ export class MediaStore {
   }
 }
 
+export function registerMediaRoutes(
+  fastify: FastifyInstance,
+  store: MediaStore,
+  prefix = "/media",
+): void {
+  fastify.get(`${prefix}/:id`, async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+
+    const { id } = req.params as { id: string };
+
+    if (!isValidMediaId(id)) {
+      reply.code(400).send({ ok: false, error: { code: "INVALID_MEDIA_ID", message: "Invalid media ID" } });
+      return;
+    }
+
+    const metadata = store.getMetadata(id);
+    if (!metadata) {
+      reply.code(404).send({ ok: false, error: { code: "NOT_FOUND", message: "Media not found" } });
+      return;
+    }
+
+    if (store.isExpired(metadata)) {
+      store.delete(id);
+      reply.code(410).send({ ok: false, error: { code: "EXPIRED", message: "Media has expired" } });
+      return;
+    }
+
+    const data = store.get(id);
+    if (!data) {
+      reply.code(404).send({ ok: false, error: { code: "NOT_FOUND", message: "Media data not found" } });
+      return;
+    }
+
+    reply.header("Content-Type", metadata.mimeType);
+    reply.header("Content-Length", data.length);
+    reply.header("Cache-Control", "private, max-age=3600");
+    reply.send(data);
+  });
+
+  fastify.get(`${prefix}`, async (_req: FastifyRequest, reply: FastifyReply) => {
+    const files = store.list();
+    reply.send({
+      ok: true,
+      data: files.map((f) => ({
+        id: f.id,
+        filename: f.filename,
+        mimeType: f.mimeType,
+        size: f.size,
+        createdAt: f.createdAt,
+        expired: store.isExpired(f),
+      })),
+    });
+  });
+
+  logger.info(`Media routes registered at ${prefix}`);
+}
+
 export class MediaServer {
   private store: MediaStore;
   private server: http.Server | null = null;
@@ -195,6 +306,8 @@ export class MediaServer {
   }
 
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
     const url = req.url ?? "/";
     const match = url.match(/^\/media\/(.+)$/);
 
@@ -205,10 +318,29 @@ export class MediaServer {
     }
 
     const id = match[1]!;
-    const data = this.store.get(id);
-    const metadata = this.store.getMetadata(id);
 
-    if (!data || !metadata) {
+    if (!isValidMediaId(id)) {
+      res.writeHead(400);
+      res.end("Invalid media ID");
+      return;
+    }
+
+    const metadata = this.store.getMetadata(id);
+    if (!metadata) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+
+    if (this.store.isExpired(metadata)) {
+      this.store.delete(id);
+      res.writeHead(410);
+      res.end("Expired");
+      return;
+    }
+
+    const data = this.store.get(id);
+    if (!data) {
       res.writeHead(404);
       res.end("Not found");
       return;

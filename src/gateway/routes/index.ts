@@ -15,6 +15,7 @@ import { registerChannelRoutes } from "./channels.js";
 import { registerAutomationRoutes } from "./automation.js";
 import { registerRAGRoutes } from "./rag.js";
 import { registerNotificationRoutes } from "./notification.js";
+import { registerMediaGatewayRoutes } from "./media.js";
 import { registerOpenAICompatRoutes } from "../openai-compat.js";
 
 export function registerRoutes(
@@ -39,6 +40,7 @@ export function registerRoutes(
   registerAutomationRoutes(fastify, deps);
   registerRAGRoutes(fastify, deps, apiPrefix);
   registerNotificationRoutes(fastify, deps, apiPrefix);
+  registerMediaGatewayRoutes(fastify, deps);
 
   registerOpenAICompatRoutes(fastify, deps, events);
 }

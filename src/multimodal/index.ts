@@ -7,11 +7,12 @@ import { VideoRunner } from "./video/video-runner.js";
 import { BrowserScreenshot, ScreenScreenshot } from "./screenshot/screenshot.js";
 import { MediaStore, MediaServer } from "./media/store.js";
 import { ImageOps } from "./media/image-ops.js";
-import { parseMediaTokens, extractMediaUrls, stripMediaTokens } from "./media/parse.js";
+import { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaHttpUrl, replaceMediaTokensWithHttpUrls } from "./media/parse.js";
 import { logger } from "../utils/logger.js";
 
-export { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaToken, buildMediaHttpUrl } from "./media/parse.js";
+export { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaToken, buildMediaHttpUrl, replaceMediaTokensWithHttpUrls } from "./media/parse.js";
 export { ImageOps } from "./media/image-ops.js";
+export { MediaStore, MediaServer, registerMediaRoutes } from "./media/store.js";
 export type { ImageMetadata, ImageOpsConfig } from "./media/image-ops.js";
 export type { ParsedMediaSegment } from "./media/parse.js";
 
@@ -25,6 +26,7 @@ export class MultimodalManager {
   private mediaStore: MediaStore;
   private mediaServer: MediaServer | null = null;
   private imageOps: ImageOps;
+  private gatewayMode = false;
 
   constructor(config: MultimodalConfig, modelManager: ModelManager, dataDir: string) {
     this.config = config;
@@ -46,13 +48,15 @@ export class MultimodalManager {
     });
   }
 
-  initialize(): void {
+  initialize(opts?: { gatewayMode?: boolean }): void {
+    this.gatewayMode = opts?.gatewayMode ?? false;
+
     this.mediaStore.initialize();
     this.imageOps.initialize().catch((error) => {
       logger.warn(`ImageOps initialization warning: ${error}`);
     });
 
-    if (this.config.media.http_port) {
+    if (!this.gatewayMode && this.config.media.http_port) {
       this.mediaServer = new MediaServer(this.mediaStore, this.config.media.http_port);
       this.mediaServer.start().catch((error) => {
         logger.warn(`Media server failed to start: ${error}`);
@@ -60,7 +64,11 @@ export class MultimodalManager {
       });
     }
 
-    logger.info("Multimodal manager initialized");
+    if (this.gatewayMode) {
+      logger.info("Multimodal manager initialized (gateway mode — media routes via Fastify)");
+    } else {
+      logger.info("Multimodal manager initialized");
+    }
   }
 
   async analyzeImage(
@@ -116,6 +124,21 @@ export class MultimodalManager {
     return this.imageOps;
   }
 
+  isGatewayMode(): boolean {
+    return this.gatewayMode;
+  }
+
+  getMediaHttpPort(): number {
+    return this.config.media.http_port;
+  }
+
+  buildMediaUrl(mediaId: string, gatewayPort?: number): string {
+    if (this.gatewayMode && gatewayPort) {
+      return `http://127.0.0.1:${gatewayPort}/media/${mediaId}`;
+    }
+    return buildMediaHttpUrl(mediaId, this.config.media.http_port);
+  }
+
   parseMediaTokens(text: string) {
     return parseMediaTokens(text);
   }
@@ -126,6 +149,15 @@ export class MultimodalManager {
 
   stripMediaTokens(text: string) {
     return stripMediaTokens(text);
+  }
+
+  replaceMediaTokensWithHttpUrls(
+    text: string,
+    resolveMediaId: (url: string) => string | null,
+    port?: number,
+  ): string {
+    const effectivePort = port ?? this.config.media.http_port;
+    return replaceMediaTokensWithHttpUrls(text, resolveMediaId, effectivePort);
   }
 
   async preprocessImage(

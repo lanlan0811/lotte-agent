@@ -295,7 +295,7 @@ export class LotteApp {
           this.modelManager,
           this.config.getPaths().dataDir,
         );
-        this.multimodalManager.initialize();
+        this.multimodalManager.initialize({ gatewayMode: true });
       } catch (error) {
         logger.warn(`Multimodal initialization error: ${error}`);
         this.multimodalManager = null;

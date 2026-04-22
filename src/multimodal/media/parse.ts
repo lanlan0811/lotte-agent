@@ -82,6 +82,29 @@ export function buildMediaHttpUrl(mediaId: string, port: number): string {
   return `http://127.0.0.1:${port}/media/${mediaId}`;
 }
 
+export function replaceMediaTokensWithHttpUrls(
+  text: string,
+  resolveMediaId: (url: string) => string | null,
+  port: number,
+): string {
+  return text.replace(MEDIA_TOKEN_RE, (_match, rawUrl: string) => {
+    const cleaned = cleanMediaUrl(rawUrl?.trim());
+    if (!cleaned) return "";
+
+    if (isHttpUrl(cleaned) || isDataUrl(cleaned)) {
+      return cleaned;
+    }
+
+    const mediaId = resolveMediaId(cleaned);
+    if (mediaId) {
+      return buildMediaHttpUrl(mediaId, port);
+    }
+
+    logger.debug(`Could not resolve media ID for: ${cleaned}`);
+    return cleaned;
+  });
+}
+
 function cleanMediaUrl(raw: string): string | null {
   const candidate = raw.replace(/^[`"'[{(]+/, "").replace(/[`"'\\})\],]+$/, "");
 
