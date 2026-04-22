@@ -8,6 +8,7 @@ import { logger } from "../utils/logger.js";
 import { registerAuthMiddleware, type AuthResult } from "./auth.js";
 import { registerRoutes } from "./routes/index.js";
 import { WebSocketManager } from "./websocket.js";
+import { registerWebUiRoutes } from "./web-ui.js";
 import { EventEmitter } from "./events.js";
 
 export interface GatewayDeps {
@@ -95,6 +96,15 @@ export class Gateway {
     });
 
     registerRoutes(this.fastify, this.deps, this.eventEmitter);
+
+    const webConfig = config.web || { enabled: false, root: "", base_path: "" };
+    if (webConfig.enabled) {
+      registerWebUiRoutes(
+        this.fastify,
+        webConfig,
+        `http://${config.host}:${config.port}`,
+      );
+    }
 
     this.wsManager = new WebSocketManager(this.deps, this.eventEmitter);
 

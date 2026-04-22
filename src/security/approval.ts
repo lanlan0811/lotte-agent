@@ -1,6 +1,16 @@
 import { EventEmitter } from "node:events";
 import { logger } from "../utils/logger.js";
 
+export type ApprovalMode = "auto" | "gate" | "strict";
+
+export interface ApprovalPolicy {
+  mode: ApprovalMode;
+  gateTimeoutMs: number;
+  gateAutoDenyOnTimeout: boolean;
+  maxPendingRequests: number;
+  riskLevelRequireManual: ("low" | "medium" | "high" | "critical")[];
+}
+
 export interface ApprovalRequest {
   id: string;
   sessionId: string;
@@ -11,6 +21,7 @@ export interface ApprovalRequest {
   description: string;
   createdAt: number;
   expiresAt: number;
+  gateNotified: boolean;
 }
 
 export interface ApprovalDecision {
@@ -19,6 +30,7 @@ export interface ApprovalDecision {
   reason?: string;
   autoApproved: boolean;
   decidedAt: number;
+  gateMode?: boolean;
 }
 
 export interface AutoApprovalRule {
@@ -37,25 +49,60 @@ const RISK_LEVEL_ORDER: Record<string, number> = {
   critical: 3,
 };
 
+const DEFAULT_POLICY: ApprovalPolicy = {
+  mode: "auto",
+  gateTimeoutMs: 120_000,
+  gateAutoDenyOnTimeout: true,
+  maxPendingRequests: 100,
+  riskLevelRequireManual: ["high", "critical"],
+};
+
 export class ApprovalSystem extends EventEmitter {
   private pendingRequests: Map<string, ApprovalRequest> = new Map();
   private decisions: Map<string, ApprovalDecision> = new Map();
   private autoApprovalRules: AutoApprovalRule[] = [];
   private requestTimeout: number;
+  private policy: ApprovalPolicy;
   private idCounter = 0;
 
-  constructor(options?: { requestTimeout?: number }) {
+  constructor(options?: { requestTimeout?: number; policy?: Partial<ApprovalPolicy> }) {
     super();
     this.requestTimeout = options?.requestTimeout ?? 60000;
+    this.policy = { ...DEFAULT_POLICY, ...options?.policy };
   }
 
-  async requestApproval(request: Omit<ApprovalRequest, "id" | "createdAt" | "expiresAt">): Promise<ApprovalDecision> {
+  getPolicy(): ApprovalPolicy {
+    return { ...this.policy };
+  }
+
+  updatePolicy(updates: Partial<ApprovalPolicy>): void {
+    this.policy = { ...this.policy, ...updates };
+    logger.info(`Approval policy updated: mode=${this.policy.mode}`);
+  }
+
+  async requestApproval(request: Omit<ApprovalRequest, "id" | "createdAt" | "expiresAt" | "gateNotified">): Promise<ApprovalDecision> {
     const fullRequest: ApprovalRequest = {
       ...request,
       id: this.generateId(),
       createdAt: Date.now(),
       expiresAt: Date.now() + this.requestTimeout,
+      gateNotified: false,
     };
+
+    if (this.pendingRequests.size >= this.policy.maxPendingRequests) {
+      const oldest = this.pendingRequests.values().next().value;
+      if (oldest) {
+        this.expireRequest(oldest.id, "Max pending requests exceeded");
+      }
+    }
+
+    if (this.policy.mode === "strict") {
+      return this.gateApproval(fullRequest);
+    }
+
+    if (this.policy.mode === "gate" && this.requiresManualApproval(fullRequest)) {
+      return this.gateApproval(fullRequest);
+    }
 
     const autoDecision = this.evaluateAutoApproval(fullRequest);
     if (autoDecision) {
@@ -64,31 +111,75 @@ export class ApprovalSystem extends EventEmitter {
       return autoDecision;
     }
 
-    this.pendingRequests.set(fullRequest.id, fullRequest);
+    if (this.policy.mode === "gate" || this.requiresManualApproval(fullRequest)) {
+      return this.gateApproval(fullRequest);
+    }
 
-    this.emit("approval_requested", fullRequest);
+    return this.gateApproval(fullRequest);
+  }
+
+  private requiresManualApproval(request: ApprovalRequest): boolean {
+    return this.policy.riskLevelRequireManual.includes(request.riskLevel);
+  }
+
+  private gateApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
+    this.pendingRequests.set(request.id, request);
+    request.gateNotified = true;
+
+    this.emit("approval_requested", request);
+    this.emit("gate_opened", {
+      requestId: request.id,
+      toolName: request.toolName,
+      riskLevel: request.riskLevel,
+      description: request.description,
+    });
+
+    logger.info(`Gate opened for ${request.toolName} (risk: ${request.riskLevel}, id: ${request.id})`);
 
     return new Promise<ApprovalDecision>((resolve) => {
+      const gateTimeout = this.policy.gateTimeoutMs;
+
       const timeout = setTimeout(() => {
-        this.pendingRequests.delete(fullRequest.id);
+        this.pendingRequests.delete(request.id);
         const decision: ApprovalDecision = {
-          requestId: fullRequest.id,
+          requestId: request.id,
           approved: false,
-          reason: "Request timed out",
+          reason: this.policy.gateAutoDenyOnTimeout
+            ? "Gate timeout - auto denied"
+            : "Gate timeout - no response",
           autoApproved: false,
           decidedAt: Date.now(),
+          gateMode: true,
         };
         this.decisions.set(decision.requestId, decision);
+        this.emit("gate_timeout", { requestId: request.id, autoDenied: this.policy.gateAutoDenyOnTimeout });
         resolve(decision);
-      }, this.requestTimeout);
+      }, gateTimeout);
 
-      this.once(`decision:${fullRequest.id}`, (decision: ApprovalDecision) => {
+      this.once(`decision:${request.id}`, (decision: ApprovalDecision) => {
         clearTimeout(timeout);
-        this.pendingRequests.delete(fullRequest.id);
+        this.pendingRequests.delete(request.id);
+        decision.gateMode = true;
         this.decisions.set(decision.requestId, decision);
         resolve(decision);
       });
     });
+  }
+
+  private expireRequest(requestId: string, reason: string): void {
+    const request = this.pendingRequests.get(requestId);
+    if (!request) return;
+
+    this.pendingRequests.delete(requestId);
+    const decision: ApprovalDecision = {
+      requestId,
+      approved: false,
+      reason,
+      autoApproved: false,
+      decidedAt: Date.now(),
+    };
+    this.decisions.set(requestId, decision);
+    this.emit(`decision:${requestId}`, decision);
   }
 
   decide(requestId: string, approved: boolean, reason?: string): boolean {

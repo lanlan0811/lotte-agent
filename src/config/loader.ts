@@ -43,6 +43,7 @@ import {
   getVoiceConfigDefaults,
 } from "./defaults.js";
 import { type ConfigPaths, resolveAllPaths, ensureDirectories, setFilePermissions } from "./paths.js";
+import { restoreEnvVarRefs } from "./env-preserve.js";
 import { logger } from "../utils/logger.js";
 
 type ConfigChangeCallback = (configName: string) => void;
@@ -469,7 +470,18 @@ export class ConfigLoader {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    const json = JSON.stringify(config, null, 2) + "\n";
+    let configToWrite = config;
+    if (fs.existsSync(filePath)) {
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        configToWrite = restoreEnvVarRefs(config, parsed) as T;
+      } catch {
+        // If we can't read the existing file, write the config as-is
+      }
+    }
+
+    const json = JSON.stringify(configToWrite, null, 2) + "\n";
     fs.writeFileSync(filePath, json, "utf-8");
     setFilePermissions(filePath, 0o600);
   }
@@ -480,7 +492,18 @@ export class ConfigLoader {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    const json = JSON.stringify(config, null, 2) + "\n";
+    let configToWrite = config;
+    if (fs.existsSync(filePath)) {
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        configToWrite = restoreEnvVarRefs(config, parsed) as T;
+      } catch {
+        // If we can't read the existing file, write the config as-is
+      }
+    }
+
+    const json = JSON.stringify(configToWrite, null, 2) + "\n";
     fs.writeFileSync(filePath, json, "utf-8");
     setFilePermissions(filePath, 0o600);
   }

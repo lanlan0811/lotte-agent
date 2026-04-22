@@ -43,23 +43,55 @@ export interface ClientInfo {
   mode: string;
 }
 
+interface ChallengeState {
+  nonce: string;
+  issuedAt: number;
+  resolved: boolean;
+}
+
 interface ConnectedClient {
   ws: WebSocket;
   clientInfo: ClientInfo | null;
   authenticated: boolean;
   connectedAt: number;
   lastActivity: number;
+  challenge: ChallengeState | null;
+  handshakeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const MAX_PAYLOAD = 5 * 1024 * 1024;
 const TICK_INTERVAL_MS = 30000;
 const HEARTBEAT_TIMEOUT_MULTIPLIER = 2;
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+const MIN_CHALLENGE_TIMEOUT_MS = 250;
+const MAX_CHALLENGE_TIMEOUT_MS = DEFAULT_HANDSHAKE_TIMEOUT_MS;
+const CHALLENGE_NONCE_BYTES = 32;
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf-8");
   const bufB = Buffer.from(b, "utf-8");
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function clampChallengeTimeoutMs(timeoutMs: number): number {
+  return Math.max(MIN_CHALLENGE_TIMEOUT_MS, Math.min(MAX_CHALLENGE_TIMEOUT_MS, timeoutMs));
+}
+
+function resolveHandshakeTimeoutMs(timeoutMs?: number | null): number {
+  if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs)) {
+    return clampChallengeTimeoutMs(timeoutMs);
+  }
+  return DEFAULT_HANDSHAKE_TIMEOUT_MS;
+}
+
+function computeHmacResponse(nonce: string, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(nonce).digest("hex");
+}
+
+function verifyChallengeResponse(nonce: string, secret: string, response: string): boolean {
+  const expected = computeHmacResponse(nonce, secret);
+  return safeEqual(expected, response);
 }
 
 export class WebSocketManager {
@@ -126,10 +158,14 @@ export class WebSocketManager {
       authenticated: false,
       connectedAt: Date.now(),
       lastActivity: Date.now(),
+      challenge: null,
+      handshakeTimer: null,
     };
 
     this.clients.set(clientId, client);
     logger.info(`WebSocket client connected: ${clientId} (total: ${this.clients.size})`);
+
+    this.startHandshake(clientId);
 
     ws.on("message", (data: RawData) => {
       try {
@@ -141,11 +177,13 @@ export class WebSocketManager {
     });
 
     ws.on("close", (code) => {
+      this.clearHandshakeTimer(clientId);
       this.clients.delete(clientId);
       logger.info(`WebSocket client disconnected: ${clientId} (code: ${code}, total: ${this.clients.size})`);
     });
 
     ws.on("error", (error) => {
+      this.clearHandshakeTimer(clientId);
       logger.error(`WebSocket client error (${clientId}): ${error.message}`);
       this.clients.delete(clientId);
     });
@@ -157,6 +195,100 @@ export class WebSocketManager {
     ws.on("pong", () => {
       client.lastActivity = Date.now();
     });
+  }
+
+  private startHandshake(clientId: string): void {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    const authConfig: AuthConfig = {
+      mode: this.deps.config.auth.mode,
+      token: this.deps.config.auth.token,
+      password: this.deps.config.auth.password,
+    };
+
+    if (authConfig.mode === "none") {
+      client.authenticated = true;
+      client.clientInfo = { id: "anonymous", version: "0.0.0", platform: "unknown", mode: "default" };
+      this.sendResponse(clientId, "", true, {
+        type: "hello-ok",
+        protocol: 1,
+        server: { version: "0.1.0", connId: clientId },
+        features: this.getFeatures(),
+        policy: this.getPolicy(),
+      });
+      return;
+    }
+
+    const nonce = crypto.randomBytes(CHALLENGE_NONCE_BYTES).toString("hex");
+    client.challenge = { nonce, issuedAt: Date.now(), resolved: false };
+
+    const handshakeTimeout = resolveHandshakeTimeoutMs(
+      (this.deps.config as Record<string, unknown>).handshakeTimeoutMs as number | undefined,
+    );
+
+    client.handshakeTimer = setTimeout(() => {
+      const c = this.clients.get(clientId);
+      if (c && !c.authenticated) {
+        logger.warn(`WebSocket handshake timeout: ${clientId}`);
+        c.ws.close(4002, "Handshake timeout");
+        this.clients.delete(clientId);
+      }
+    }, handshakeTimeout);
+
+    this.sendResponse(clientId, "", true, {
+      type: "challenge",
+      protocol: 1,
+      nonce,
+      methods: authConfig.mode === "token" ? ["hmac-token"] : ["hmac-password"],
+      timeoutMs: handshakeTimeout,
+    });
+  }
+
+  private clearHandshakeTimer(clientId: string): void {
+    const client = this.clients.get(clientId);
+    if (client?.handshakeTimer) {
+      clearTimeout(client.handshakeTimer);
+      client.handshakeTimer = null;
+    }
+  }
+
+  private getFeatures() {
+    return {
+      methods: [
+        "connect",
+        "chat.send",
+        "chat.abort",
+        "sessions.list",
+        "sessions.create",
+        "sessions.delete",
+        "sessions.compact",
+        "config.get",
+        "config.set",
+        "tools.catalog",
+        "tools.invoke",
+        "approval.pending",
+        "approval.resolve",
+        "logs.tail",
+      ],
+      events: [
+        "tick",
+        "agent.message",
+        "agent.done",
+        "agent.error",
+        "approval.request",
+        "config.changed",
+        "shutdown",
+      ],
+    };
+  }
+
+  private getPolicy() {
+    return {
+      maxPayload: MAX_PAYLOAD,
+      maxBufferedBytes: 1024 * 1024,
+      tickIntervalMs: TICK_INTERVAL_MS,
+    };
   }
 
   private handleMessage(clientId: string, frame: GatewayFrame): void {
@@ -207,7 +339,7 @@ export class WebSocketManager {
     const client = this.clients.get(clientId);
     if (!client) return;
 
-    const authParams = params?.auth as { token?: string; password?: string } | undefined;
+    const authParams = params?.auth as { token?: string; password?: string; challengeResponse?: string; method?: string } | undefined;
     const clientParams = params?.client as { id?: string; version?: string; platform?: string; mode?: string } | undefined;
 
     const authConfig: AuthConfig = {
@@ -220,6 +352,20 @@ export class WebSocketManager {
 
     if (authConfig.mode === "none") {
       authResult = { authenticated: true, method: "none" };
+    } else if (authParams?.challengeResponse && client.challenge && !client.challenge.resolved) {
+      const secret = authConfig.mode === "token" ? authConfig.token : authConfig.password;
+      if (!secret) {
+        authResult = { authenticated: false, reason: "Server secret not configured" };
+      } else if (verifyChallengeResponse(client.challenge.nonce, secret, authParams.challengeResponse)) {
+        client.challenge.resolved = true;
+        authResult = {
+          authenticated: true,
+          method: authConfig.mode === "token" ? "token" : "password",
+          user: `${authConfig.mode}-user`,
+        };
+      } else {
+        authResult = { authenticated: false, reason: "Invalid challenge response" };
+      }
     } else if (authParams?.token) {
       if (authConfig.token && safeEqual(authParams.token, authConfig.token)) {
         authResult = { authenticated: true, method: "token", user: "token-user" };
@@ -245,6 +391,7 @@ export class WebSocketManager {
       return;
     }
 
+    this.clearHandshakeTimer(clientId);
     client.authenticated = true;
     client.clientInfo = {
       id: clientParams?.id ?? "unknown",
@@ -260,38 +407,8 @@ export class WebSocketManager {
         version: "0.1.0",
         connId: clientId,
       },
-      features: {
-        methods: [
-          "connect",
-          "chat.send",
-          "chat.abort",
-          "sessions.list",
-          "sessions.create",
-          "sessions.delete",
-          "sessions.compact",
-          "config.get",
-          "config.set",
-          "tools.catalog",
-          "tools.invoke",
-          "approval.pending",
-          "approval.resolve",
-          "logs.tail",
-        ],
-        events: [
-          "tick",
-          "agent.message",
-          "agent.done",
-          "agent.error",
-          "approval.request",
-          "config.changed",
-          "shutdown",
-        ],
-      },
-      policy: {
-        maxPayload: MAX_PAYLOAD,
-        maxBufferedBytes: 1024 * 1024,
-        tickIntervalMs: TICK_INTERVAL_MS,
-      },
+      features: this.getFeatures(),
+      policy: this.getPolicy(),
     });
 
     logger.info(`WebSocket client authenticated: ${clientId} (${client.clientInfo.id})`);

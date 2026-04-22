@@ -104,6 +104,11 @@ export function getGatewayConfigDefaults(): GatewayConfig {
       max_connections: 10,
       heartbeat_interval: 30000,
     },
+    web: {
+      enabled: false,
+      root: "",
+      base_path: "",
+    },
   };
 }
 

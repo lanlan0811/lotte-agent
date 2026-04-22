@@ -1,10 +1,79 @@
 import { Cron } from "croner";
 import type { CronSchedule, CronJob } from "./types.js";
 import { logger } from "../utils/logger.js";
+
 const MIN_REFIRE_GAP_MS = 2000;
 const ERROR_BACKOFF_BASE_MS = 5000;
 const MAX_ERROR_BACKOFF_MS = 3600000;
 const MAX_CONSECUTIVE_ERRORS = 10;
+
+const CRON_EVAL_CACHE_MAX = 512;
+const cronEvalCache = new Map<string, Cron>();
+
+const DEFAULT_TOP_OF_HOUR_STAGGER_MS = 5 * 60 * 1000;
+
+function resolveCronTimezone(tz?: string): string {
+  const trimmed = (tz ?? "").trim();
+  if (trimmed) return trimmed;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+function resolveCachedCron(expr: string, timezone: string): Cron {
+  const key = `${timezone}\u0000${expr}`;
+  const cached = cronEvalCache.get(key);
+  if (cached) return cached;
+
+  if (cronEvalCache.size >= CRON_EVAL_CACHE_MAX) {
+    const oldest = cronEvalCache.keys().next().value;
+    if (oldest) cronEvalCache.delete(oldest);
+  }
+
+  const next = new Cron(expr, { timezone, catch: false });
+  cronEvalCache.set(key, next);
+  return next;
+}
+
+function parseCronFields(expr: string): string[] {
+  return expr.trim().split(/\s+/).filter(Boolean);
+}
+
+function isRecurringTopOfHourCronExpr(expr: string): boolean {
+  const fields = parseCronFields(expr);
+  if (fields.length === 5) {
+    const [minuteField, hourField] = fields;
+    return minuteField === "0" && hourField!.includes("*");
+  }
+  if (fields.length === 6) {
+    const [secondField, minuteField, hourField] = fields;
+    return secondField === "0" && minuteField === "0" && hourField!.includes("*");
+  }
+  return false;
+}
+
+function normalizeCronStaggerMs(raw: unknown): number | undefined {
+  const numeric =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim()
+        ? Number(raw)
+        : Number.NaN;
+  if (!Number.isFinite(numeric)) return undefined;
+  return Math.max(0, Math.floor(numeric));
+}
+
+function resolveDefaultCronStaggerMs(expr: string): number | undefined {
+  return isRecurringTopOfHourCronExpr(expr) ? DEFAULT_TOP_OF_HOUR_STAGGER_MS : undefined;
+}
+
+function resolveCronStaggerMs(schedule: Extract<CronSchedule, { kind: "cron" }>): number {
+  const explicit = normalizeCronStaggerMs(
+    (schedule as Record<string, unknown>).staggerMs,
+  );
+  if (explicit !== undefined) return explicit;
+  const expr = (schedule as { expr?: unknown }).expr;
+  const cronExpr = typeof expr === "string" ? expr : "";
+  return resolveDefaultCronStaggerMs(cronExpr) ?? 0;
+}
 
 function computeNextRun(schedule: CronSchedule, nowMs: number): number | null {
   if (schedule.kind === "at") {
@@ -22,20 +91,40 @@ function computeNextRun(schedule: CronSchedule, nowMs: number): number | null {
 
   if (schedule.kind === "cron") {
     try {
-      const tz = schedule.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const cron = new Cron(schedule.expr, { timezone: tz });
-      const next = cron.nextRun(new Date(nowMs));
+      const tz = resolveCronTimezone(schedule.tz);
+      const cron = resolveCachedCron(schedule.expr, tz);
+
+      let next = cron.nextRun(new Date(nowMs));
       if (!next) return null;
-      const nextMs = next.getTime();
+      let nextMs = next.getTime();
       if (!Number.isFinite(nextMs)) return null;
+
       if (nextMs <= nowMs) {
-        const retry = cron.nextRun(new Date(nowMs + 1000));
+        const nextSecondMs = Math.floor(nowMs / 1000) * 1000 + 1000;
+        const retry = cron.nextRun(new Date(nextSecondMs));
         if (retry) {
           const retryMs = retry.getTime();
-          if (Number.isFinite(retryMs) && retryMs > nowMs) return retryMs;
+          if (Number.isFinite(retryMs) && retryMs > nowMs) {
+            nextMs = retryMs;
+          } else {
+            const tomorrowMs = new Date(nowMs).setUTCHours(24, 0, 0, 0);
+            const retry2 = cron.nextRun(new Date(tomorrowMs));
+            if (retry2) {
+              const retry2Ms = retry2.getTime();
+              if (Number.isFinite(retry2Ms) && retry2Ms > nowMs) return retry2Ms;
+            }
+            return null;
+          }
+        } else {
+          return null;
         }
-        return null;
       }
+
+      const stagger = resolveCronStaggerMs(schedule);
+      if (stagger > 0) {
+        nextMs += stagger;
+      }
+
       return nextMs;
     } catch (error) {
       logger.error(`Cron expression error: ${error}`);
@@ -49,11 +138,13 @@ function computeNextRun(schedule: CronSchedule, nowMs: number): number | null {
 function computePreviousRun(schedule: CronSchedule, nowMs: number): number | null {
   if (schedule.kind !== "cron") return null;
   try {
-    const tz = schedule.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const cron = new Cron(schedule.expr, { timezone: tz, startAt: new Date(nowMs) });
-    const runs = cron.previousRun();
-    if (!runs) return null;
-    const prevMs = runs.getTime();
+    const tz = resolveCronTimezone(schedule.tz);
+    const cron = resolveCachedCron(schedule.expr, tz);
+    const nextMs = cron.nextRun(new Date(nowMs))?.getTime();
+    if (nextMs === undefined || !Number.isFinite(nextMs)) return null;
+    const prev = cron.previousRun();
+    if (!prev) return null;
+    const prevMs = prev.getTime();
     return Number.isFinite(prevMs) && prevMs < nowMs ? prevMs : null;
   } catch {
     return null;
@@ -300,4 +391,12 @@ export class CronScheduler {
   }
 }
 
-export { computeNextRun, computePreviousRun, errorBackoffMs };
+export { computeNextRun, computePreviousRun, errorBackoffMs, resolveCronStaggerMs, isRecurringTopOfHourCronExpr };
+
+export function clearCronEvalCacheForTest(): void {
+  cronEvalCache.clear();
+}
+
+export function getCronEvalCacheSizeForTest(): number {
+  return cronEvalCache.size;
+}

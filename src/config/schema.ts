@@ -69,6 +69,13 @@ export const GatewayConfigSchema = z.object({
       heartbeat_interval: z.number().int().positive().default(30000),
     })
     .default({}),
+  web: z
+    .object({
+      enabled: z.boolean().default(false),
+      root: z.string().default(""),
+      base_path: z.string().default(""),
+    })
+    .default({}),
 });
 
 export const WeixinChannelSchema = z.object({

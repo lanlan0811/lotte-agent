@@ -5,7 +5,8 @@ import { logger } from "../utils/logger.js";
 
 const CONNECT_TIMEOUT = 60_000;
 const RECONNECT_BASE_DELAY = 2000;
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 50;
+const RECONNECT_MAX_DELAY = 300_000;
 
 interface FailureRecord {
   timestamp: number;
@@ -104,42 +105,55 @@ export class MCPClientManager {
   }
 
   async replaceClient(key: string, config: MCPClientConfig): Promise<void> {
-    logger.debug(`Replacing MCP client: ${key}`);
+    logger.debug(`Atomic hot-replacing MCP client: ${key}`);
 
     const newClient = new StatefulMCPClient(config);
 
-    this.entries.set(key, this.defaultEntry(key, newClient, "connecting"));
-
     try {
-      await withTimeout(newClient.connect(), CONNECT_TIMEOUT, `MCP client '${key}' replace`);
+      await withTimeout(newClient.connect(), CONNECT_TIMEOUT, `MCP client '${key}' hot-replace connect`);
 
-      const oldEntry = this.entries.get(key);
-      if (oldEntry && oldEntry.client !== newClient) {
-        try {
-          await oldEntry.client.close();
-        } catch (error) {
-          logger.debug(`Error closing old MCP client '${key}': ${error}`);
-        }
+      const toolsSnapshot = newClient.getToolsSnapshot();
+      const isHealthy = newClient.isConnected && toolsSnapshot.length >= 0;
+      if (!isHealthy) {
+        throw new Error(`MCP client '${key}' health check failed after connect`);
       }
 
-      const entry = this.defaultEntry(key, newClient, "connected");
-      entry.connectedAt = Date.now();
-      this.entries.set(key, entry);
-
-      logger.info(`MCP client '${key}' replaced successfully`);
+      logger.info(`MCP client '${key}' new connection verified, swapping...`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-
       try {
         await newClient.close();
       } catch {
         // Ignore
       }
 
-      this.entries.set(key, this.defaultEntry(key, newClient, "error", msg));
+      const oldEntry = this.entries.get(key);
+      if (oldEntry && oldEntry.status === "connected") {
+        logger.warn(`MCP client '${key}' hot-replace failed, keeping old connection: ${msg}`);
+      }
 
       throw error;
     }
+
+    const oldEntry = this.entries.get(key);
+    if (oldEntry) {
+      if (oldEntry.reconnectTimer) {
+        clearTimeout(oldEntry.reconnectTimer);
+      }
+
+      try {
+        await oldEntry.client.close();
+        logger.debug(`MCP client '${key}' old connection closed after successful swap`);
+      } catch (error) {
+        logger.debug(`Error closing old MCP client '${key}': ${error}`);
+      }
+    }
+
+    const entry = this.defaultEntry(key, newClient, "connected");
+    entry.connectedAt = Date.now();
+    this.entries.set(key, entry);
+
+    logger.info(`MCP client '${key}' atomic hot-replace completed successfully`);
   }
 
   async removeClient(key: string): Promise<void> {
@@ -224,12 +238,14 @@ export class MCPClientManager {
     if (!entry) return;
 
     if (entry.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      logger.warn(`MCP client '${key}' exceeded max reconnect attempts (${MAX_RECONNECT_ATTEMPTS})`);
-      return;
+      logger.warn(`MCP client '${key}' exceeded max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}), entering extended backoff`);
+      entry.reconnectAttempts = Math.floor(MAX_RECONNECT_ATTEMPTS / 2);
     }
 
     entry.reconnectAttempts++;
-    const delay = RECONNECT_BASE_DELAY * Math.pow(2, entry.reconnectAttempts - 1);
+    const baseDelay = RECONNECT_BASE_DELAY * Math.pow(2, Math.min(entry.reconnectAttempts - 1, 8));
+    const jitter = Math.floor(Math.random() * 1000);
+    const delay = Math.min(baseDelay + jitter, RECONNECT_MAX_DELAY);
 
     logger.info(`MCP client '${key}' reconnecting in ${delay}ms (attempt ${entry.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
 
@@ -408,7 +424,7 @@ export class MCPClientManager {
 
     if (recentFailures.length < 3) return false;
 
-    const lastFailure = recentFailures[recentFailures.length - 1];
+    const lastFailure = recentFailures[recentFailures.length - 1]!;
     const backoffDelay = RECONNECT_BASE_DELAY * Math.pow(2, Math.min(recentFailures.length - 1, 5));
     const backoffUntil = lastFailure.timestamp + backoffDelay;
 

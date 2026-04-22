@@ -298,6 +298,77 @@ export function buildCLI(): Command {
     });
 
   program
+    .command("gateway")
+    .description("网关管理")
+    .addCommand(
+      new Command("start")
+        .description("启动网关服务")
+        .option("--port <port>", "网关端口", parseInt)
+        .option("--host <host>", "网关主机")
+        .option("--web", "启用Web UI")
+        .option("--web-root <path>", "Web UI静态资源目录")
+        .action(async (opts, cmd) => {
+          const globalOpts = cmd.optsWithGlobals();
+          applyGlobalOptions(globalOpts);
+
+          const app = new LotteApp();
+          setupShutdownHandlers(app);
+
+          try {
+            await app.start();
+
+            if (opts.web) {
+              const configLoader = app.getConfig();
+              const gatewayConfig = { ...configLoader.getGateway() };
+              gatewayConfig.web = {
+                ...gatewayConfig.web,
+                enabled: true,
+                root: opts.webRoot || gatewayConfig.web?.root || "",
+              };
+              await configLoader.saveGateway(gatewayConfig);
+              logger.info("Web UI enabled");
+            }
+
+            if (opts.port) {
+              const configLoader = app.getConfig();
+              const gatewayConfig = { ...configLoader.getGateway(), port: opts.port };
+              if (opts.host) gatewayConfig.host = opts.host;
+              await configLoader.saveGateway(gatewayConfig);
+            }
+
+            logger.info("Lotte Gateway is running. Press Ctrl+C to stop.");
+          } catch (error) {
+            logger.error("Failed to start Lotte Gateway", error);
+            process.exit(1);
+          }
+        }),
+    )
+    .addCommand(
+      new Command("status")
+        .description("查看网关状态")
+        .action(async () => {
+          try {
+            const stateDir = resolveStateDir();
+            const configFile = path.join(stateDir, "config", "gateway.json");
+            if (!fs.existsSync(configFile)) {
+              console.log("Gateway config not found. Run 'lotte init' first.");
+              return;
+            }
+            const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+            console.log(`Host: ${config.host || "127.0.0.1"}`);
+            console.log(`Port: ${config.port || 10623}`);
+            console.log(`Auth mode: ${config.auth?.mode || "none"}`);
+            console.log(`Web UI: ${config.web?.enabled ? "enabled" : "disabled"}`);
+            if (config.web?.enabled) {
+              console.log(`Web UI root: ${config.web.root || "(auto-detect)"}`);
+            }
+          } catch (error) {
+            console.error("Failed to get gateway status:", error);
+          }
+        }),
+    );
+
+  program
     .command("chat")
     .description("启动交互式对话")
     .option("--model <model>", "指定AI模型")

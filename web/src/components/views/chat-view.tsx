@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from "react";
-import { Send, Copy, Check, Wrench, Loader2, Plus, AlertCircle, WifiOff } from "lucide-react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import { Send, Copy, Check, Wrench, Loader2, Plus, AlertCircle, WifiOff, ChevronDown, ChevronRight } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { useAppStore, type ChatMessage, type ToolCallInfo } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { wsClient } from "@/lib/ws-client";
+import type { WsEvent } from "@/lib/ws-client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,9 +18,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 
 function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div className="my-2 rounded-lg border bg-muted/50 p-3 text-sm">
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-2">
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-medium">{toolCall.name}</span>
         <Badge
@@ -30,19 +35,52 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
           }
           className="text-[10px] px-1.5 py-0"
         >
-          {toolCall.status}
+          {toolCall.status === "running" ? "running" : toolCall.status}
         </Badge>
+        {(toolCall.arguments || toolCall.result) && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 ml-auto"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </Button>
+        )}
+        {toolCall.status === "running" && (
+          <Loader2 className="h-3 w-3 animate-spin ml-1" />
+        )}
       </div>
-      {toolCall.arguments && (
-        <pre className="mt-1 max-h-32 overflow-auto rounded bg-background/80 p-2 text-xs font-mono">
-          {toolCall.arguments}
-        </pre>
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {toolCall.arguments && (
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground mb-1">Arguments</div>
+              <pre className="max-h-40 overflow-auto rounded bg-background/80 p-2 text-xs font-mono whitespace-pre-wrap break-all">
+                {toolCall.arguments}
+              </pre>
+            </div>
+          )}
+          {toolCall.result && (
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground mb-1">Result</div>
+              <pre className="max-h-40 overflow-auto rounded bg-background/80 p-2 text-xs font-mono whitespace-pre-wrap break-all">
+                {toolCall.result}
+              </pre>
+            </div>
+          )}
+        </div>
       )}
-      {toolCall.result && (
-        <pre className="mt-1 max-h-32 overflow-auto rounded bg-background/80 p-2 text-xs font-mono">
-          {toolCall.result}
-        </pre>
-      )}
+    </div>
+  );
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none break-words [&_pre]:bg-background/80 [&_pre]:rounded [&_pre]:p-2 [&_code]:text-xs [&_code]:font-mono [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ol]:mb-2 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-bold [&_h3]:text-sm [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline [&_table]:text-xs [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:px-2 [&_td]:py-1">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -119,16 +157,16 @@ function MessageBubble({ message, onRetry }: { message: ChatMessage; onRetry?: (
           </div>
         ) : isError ? (
           <ErrorMessage message={message.content} onRetry={onRetry} />
-        ) : (
-          <div
-            className={cn(
-              "rounded-xl px-4 py-2.5 text-sm leading-relaxed",
-              isUser
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted",
-            )}
-          >
+        ) : isUser ? (
+          <div className="rounded-xl px-4 py-2.5 text-sm leading-relaxed bg-primary text-primary-foreground">
             <div className="whitespace-pre-wrap break-words">{message.content}</div>
+          </div>
+        ) : (
+          <div className="rounded-xl px-4 py-2.5 text-sm leading-relaxed bg-muted">
+            <MarkdownContent content={message.content} />
+            {message.status === "streaming" && (
+              <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom" />
+            )}
           </div>
         )}
         {message.toolCalls?.map((tc) => (
@@ -166,7 +204,87 @@ export function ChatView() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [sessionMessages.length]);
+  }, [sessionMessages.length, sessionMessages[sessionMessages.length - 1]?.content]);
+
+  const handleWsChunk = useCallback((event: WsEvent) => {
+    if (!activeSessionId) return;
+    if (event.type === "chat.chunk") {
+      const data = event.data;
+      const sessionId = data.sessionId as string;
+      const msgId = data.messageId as string;
+      const chunk = data.chunk as string;
+      if (sessionId === activeSessionId && msgId) {
+        const sessionMsgs = messages[activeSessionId] || [];
+        const existing = sessionMsgs.find((m) => m.id === msgId);
+        if (existing) {
+          updateMessage(activeSessionId, msgId, {
+            content: existing.content + chunk,
+            status: "streaming",
+          });
+        }
+      }
+    } else if (event.type === "chat.done") {
+      const data = event.data;
+      const sessionId = data.sessionId as string;
+      const msgId = data.messageId as string;
+      if (sessionId === activeSessionId && msgId) {
+        updateMessage(activeSessionId, msgId, { status: "done" });
+      }
+    } else if (event.type === "chat.error") {
+      const data = event.data;
+      const sessionId = data.sessionId as string;
+      const msgId = data.messageId as string;
+      const errorMsg = data.error as string;
+      if (sessionId === activeSessionId && msgId) {
+        updateMessage(activeSessionId, msgId, {
+          content: errorMsg || "Stream error occurred",
+          status: "error",
+        });
+      }
+    } else if (event.type === "tool.call") {
+      const data = event.data;
+      const sessionId = data.sessionId as string;
+      const msgId = data.messageId as string;
+      if (sessionId === activeSessionId && msgId) {
+        const sessionMsgs = messages[activeSessionId] || [];
+        const existing = sessionMsgs.find((m) => m.id === msgId);
+        if (existing) {
+          const toolCall: ToolCallInfo = {
+            id: data.toolCallId as string,
+            name: data.toolName as string,
+            arguments: data.toolArgs as string,
+            status: "running",
+          };
+          updateMessage(activeSessionId, msgId, {
+            toolCalls: [...(existing.toolCalls || []), toolCall],
+          });
+        }
+      }
+    } else if (event.type === "tool.result") {
+      const data = event.data;
+      const sessionId = data.sessionId as string;
+      const msgId = data.messageId as string;
+      const toolCallId = data.toolCallId as string;
+      if (sessionId === activeSessionId && msgId) {
+        const sessionMsgs = messages[activeSessionId] || [];
+        const existing = sessionMsgs.find((m) => m.id === msgId);
+        if (existing && existing.toolCalls) {
+          updateMessage(activeSessionId, msgId, {
+            toolCalls: existing.toolCalls.map((tc) =>
+              tc.id === toolCallId
+                ? { ...tc, result: data.toolResult as string, status: "done" as const }
+                : tc,
+            ),
+          });
+        }
+      }
+    }
+  }, [activeSessionId, messages, updateMessage]);
+
+  useEffect(() => {
+    const unsub = wsClient.on("*", handleWsChunk);
+    return unsub;
+  }, [handleWsChunk]);
 
   const handleNewSession = () => {
     const id = `session_${Date.now()}`;
@@ -218,6 +336,19 @@ export function ChatView() {
     };
     addMessage(sessionId, assistantMsg);
 
+    if (wsClient.connected) {
+      wsClient.send({
+        type: "chat.send",
+        data: {
+          sessionId,
+          messageId: assistantMsg.id,
+          text,
+        },
+      });
+      setSending(false);
+      return;
+    }
+
     try {
       const result = await apiClient.post<{ response?: string }>(
         `/api/v1/chat/${sessionId}`,
@@ -266,6 +397,7 @@ export function ChatView() {
       updateMessage(activeSessionId!, msgId, {
         content: "",
         status: "streaming",
+        toolCalls: [],
       });
       apiClient.post<{ response?: string }>(
         `/api/v1/chat/${activeSessionId}`,
