@@ -3,7 +3,7 @@ import { logger } from "../utils/logger.js";
 import { ensureDir } from "../utils/fs.js";
 import path from "node:path";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const CREATE_META_TABLE = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -123,6 +123,16 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
   metadata_json TEXT
 )`;
 
+const CREATE_CHANNEL_RECEIVE_IDS_TABLE = `
+CREATE TABLE IF NOT EXISTS channel_receive_ids (
+  session_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  receive_id_type TEXT NOT NULL,
+  receive_id TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, channel_id)
+)`;
+
 const CREATE_INDEXES = [
   "CREATE INDEX IF NOT EXISTS idx_sessions_channel_id ON sessions(channel_id)",
   "CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)",
@@ -135,6 +145,8 @@ const CREATE_INDEXES = [
   "CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_audit_session_id ON audit_logs(session_id)",
   "CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc_id ON rag_chunks(doc_id)",
+  "CREATE INDEX IF NOT EXISTS idx_channel_receive_ids_channel_id ON channel_receive_ids(channel_id)",
+  "CREATE INDEX IF NOT EXISTS idx_channel_receive_ids_updated_at ON channel_receive_ids(updated_at)",
 ];
 
 const CREATE_FTS_TABLE = `
@@ -214,6 +226,7 @@ export class Database {
     db.exec(CREATE_AUDIT_LOGS_TABLE);
     db.exec(CREATE_RAG_DOCUMENTS_TABLE);
     db.exec(CREATE_RAG_CHUNKS_TABLE);
+    db.exec(CREATE_CHANNEL_RECEIVE_IDS_TABLE);
 
     for (const indexSql of CREATE_INDEXES) {
       db.exec(indexSql);
@@ -277,5 +290,37 @@ export class Database {
       "schema_version",
       String(version),
     );
+  }
+
+  saveReceiveId(sessionId: string, channelId: string, receiveIdType: string, receiveId: string): void {
+    const db = this.getDb();
+    db.prepare(
+      "INSERT OR REPLACE INTO channel_receive_ids (session_id, channel_id, receive_id_type, receive_id, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(sessionId, channelId, receiveIdType, receiveId, Date.now());
+  }
+
+  loadReceiveId(sessionId: string, channelId: string): { receiveIdType: string; receiveId: string } | null {
+    const db = this.getDb();
+    const row = db.prepare(
+      "SELECT receive_id_type, receive_id FROM channel_receive_ids WHERE session_id = ? AND channel_id = ?",
+    ).get(sessionId, channelId) as { receive_id_type: string; receive_id: string } | undefined;
+    if (!row) return null;
+    return { receiveIdType: row.receive_id_type, receiveId: row.receive_id };
+  }
+
+  loadReceiveIdsByChannel(channelId: string): Array<{ sessionId: string; receiveIdType: string; receiveId: string }> {
+    const db = this.getDb();
+    const rows = db.prepare(
+      "SELECT session_id, receive_id_type, receive_id FROM channel_receive_ids WHERE channel_id = ?",
+    ).all(channelId) as Array<{ session_id: string; receive_id_type: string; receive_id: string }>;
+    return rows.map((r) => ({ sessionId: r.session_id, receiveIdType: r.receive_id_type, receiveId: r.receive_id }));
+  }
+
+  deleteReceiveIdsBefore(timestamp: number): number {
+    const db = this.getDb();
+    const result = db.prepare(
+      "DELETE FROM channel_receive_ids WHERE updated_at < ?",
+    ).run(timestamp);
+    return result.changes;
   }
 }

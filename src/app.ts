@@ -181,6 +181,7 @@ export class LotteApp {
         }
       },
     );
+    this.channelManager.setDatabase(this.database);
 
     const consoleChannel = new ConsoleChannel(async (msg) => {
       try {
@@ -240,6 +241,7 @@ export class LotteApp {
         },
         channelsConfig.feishu,
       );
+      feishuChannel.setDataDir(this.config.getPaths().dataDir);
       this.channelManager.register(feishuChannel);
     }
 

@@ -4,6 +4,7 @@ import { PRIORITY_NORMAL } from "./types.js";
 import { UnifiedQueueManager } from "./queue.js";
 import { DualLevelDebouncer } from "./debounce.js";
 import { logger } from "../utils/logger.js";
+import type { Database } from "../db/database.js";
 
 export class ChannelManager {
   private channels: Map<string, BaseChannel> = new Map();
@@ -12,6 +13,7 @@ export class ChannelManager {
   private _process: ProcessHandler;
   private _onReplySent: OnReplySent | null;
   private _running = false;
+  private db: Database | null = null;
 
   constructor(process: ProcessHandler, onReplySent: OnReplySent | null = null) {
     this._process = process;
@@ -45,6 +47,10 @@ export class ChannelManager {
   register(channel: BaseChannel): void {
     this.channels.set(channel.channelType, channel);
     logger.info(`Channel registered: ${channel.channelType} (${channel.channelName})`);
+  }
+
+  setDatabase(db: Database): void {
+    this.db = db;
   }
 
   unregister(channelType: string): void {
@@ -168,6 +174,52 @@ export class ChannelManager {
 
   isRunning(): boolean {
     return this._running;
+  }
+
+  saveReceiveId(sessionId: string, channelId: string, receiveIdType: string, receiveId: string): void {
+    if (!this.db) {
+      logger.debug("ChannelManager: database not set, skipping receive_id save");
+      return;
+    }
+    this.db.saveReceiveId(sessionId, channelId, receiveIdType, receiveId);
+  }
+
+  loadReceiveId(sessionId: string, channelId: string): { receiveIdType: string; receiveId: string } | null {
+    if (!this.db) return null;
+    return this.db.loadReceiveId(sessionId, channelId);
+  }
+
+  async sendToSession(sessionId: string, text: string, meta?: Record<string, unknown>): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not set, cannot resolve session for cross-channel send");
+    }
+
+    for (const [channelType, channel] of this.channels) {
+      const entry = this.db.loadReceiveId(sessionId, channelType);
+      if (entry) {
+        try {
+          await channel.sendText(entry.receiveId, text, { ...meta, _receiveIdType: entry.receiveIdType });
+          return;
+        } catch (error) {
+          logger.error(`ChannelManager sendToSession failed for channel=${channelType}: ${error}`);
+        }
+      }
+
+      if ("getReceiveId" in channel && typeof (channel as Record<string, unknown>).getReceiveId === "function") {
+        const ch = channel as unknown as { getReceiveId: (s: string) => { receiveIdType: string; receiveId: string } | undefined };
+        const receiveInfo = ch.getReceiveId(sessionId);
+        if (receiveInfo) {
+          try {
+            await channel.sendText(receiveInfo.receiveId, text, { ...meta, _receiveIdType: receiveInfo.receiveIdType });
+            return;
+          } catch (error) {
+            logger.error(`ChannelManager sendToSession (in-memory) failed for channel=${channelType}: ${error}`);
+          }
+        }
+      }
+    }
+
+    throw new Error(`No receive_id found for session=${sessionId} in any channel`);
   }
 
   async sendCrossChannel(
