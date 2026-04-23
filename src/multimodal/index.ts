@@ -5,14 +5,16 @@ import { VisionRunner } from "./vision/vision-runner.js";
 import { ImageLoader } from "./vision/image-loader.js";
 import { VideoRunner } from "./video/video-runner.js";
 import { BrowserScreenshot, ScreenScreenshot } from "./screenshot/screenshot.js";
-import { MediaStore, MediaServer } from "./media/store.js";
+import { MediaStore } from "./media/store.js";
+import { MediaServer } from "./media/server.js";
 import { ImageOps } from "./media/image-ops.js";
 import { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaHttpUrl, replaceMediaTokensWithHttpUrls } from "./media/parse.js";
 import { logger } from "../utils/logger.js";
 
 export { parseMediaTokens, extractMediaUrls, stripMediaTokens, buildMediaToken, buildMediaHttpUrl, replaceMediaTokensWithHttpUrls } from "./media/parse.js";
 export { ImageOps } from "./media/image-ops.js";
-export { MediaStore, MediaServer, registerMediaRoutes } from "./media/store.js";
+export { MediaStore, registerMediaRoutes } from "./media/store.js";
+export { MediaServer, resolveMediaUrl } from "./media/server.js";
 export type { ImageMetadata, ImageOpsConfig } from "./media/image-ops.js";
 export type { ParsedMediaSegment } from "./media/parse.js";
 
@@ -57,7 +59,7 @@ export class MultimodalManager {
     });
 
     if (!this.gatewayMode && this.config.media.http_port) {
-      this.mediaServer = new MediaServer(this.mediaStore, this.config.media.http_port);
+      this.mediaServer = new MediaServer(this.mediaStore, { port: this.config.media.http_port });
       this.mediaServer.start().catch((error) => {
         logger.warn(`Media server failed to start: ${error}`);
         this.mediaServer = null;

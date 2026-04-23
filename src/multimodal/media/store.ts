@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import http from "node:http";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { MediaConfig, MediaFile } from "../types.js";
 import { logger } from "../../utils/logger.js";
@@ -10,7 +9,7 @@ const MAX_MEDIA_ID_CHARS = 200;
 const MEDIA_ID_PATTERN = /^[\p{L}\p{N}._-]+$/u;
 const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 
-function isValidMediaId(id: string): boolean {
+export function isValidMediaId(id: string): boolean {
   if (!id || id === "." || id === "..") return false;
   if (id.length > MAX_MEDIA_ID_CHARS) return false;
   return MEDIA_ID_PATTERN.test(id);
@@ -268,89 +267,4 @@ export function registerMediaRoutes(
   });
 
   logger.info(`Media routes registered at ${prefix}`);
-}
-
-export class MediaServer {
-  private store: MediaStore;
-  private server: http.Server | null = null;
-  private port: number;
-
-  constructor(store: MediaStore, port: number) {
-    this.store = store;
-    this.port = port;
-  }
-
-  start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.server = http.createServer((req, res) => {
-        this.handleRequest(req, res);
-      });
-
-      this.server.listen(this.port, "127.0.0.1", () => {
-        logger.info(`Media server started on http://127.0.0.1:${this.port}`);
-        resolve();
-      });
-
-      this.server.on("error", reject);
-    });
-  }
-
-  stop(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
-        resolve();
-      }
-    });
-  }
-
-  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-
-    const url = req.url ?? "/";
-    const match = url.match(/^\/media\/(.+)$/);
-
-    if (!match) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
-    }
-
-    const id = match[1]!;
-
-    if (!isValidMediaId(id)) {
-      res.writeHead(400);
-      res.end("Invalid media ID");
-      return;
-    }
-
-    const metadata = this.store.getMetadata(id);
-    if (!metadata) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
-    }
-
-    if (this.store.isExpired(metadata)) {
-      this.store.delete(id);
-      res.writeHead(410);
-      res.end("Expired");
-      return;
-    }
-
-    const data = this.store.get(id);
-    if (!data) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
-    }
-
-    res.writeHead(200, {
-      "Content-Type": metadata.mimeType,
-      "Content-Length": data.length,
-      "Cache-Control": "private, max-age=3600",
-    });
-    res.end(data);
-  }
 }

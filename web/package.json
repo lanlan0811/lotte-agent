@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/patch-next.js && next build",
+    "build:export": "node scripts/patch-next.js && next build",
     "start": "next start",
     "lint": "eslint",
     "export": "node scripts/patch-next.js && next build",

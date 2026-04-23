@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { LotteApp } from "../app.js";
 import { logger, type LogLevel } from "../utils/logger.js";
 import { resolveStateDir } from "../config/paths.js";
+import { GatewayLauncher } from "./gateway-launcher.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -299,74 +300,33 @@ export function buildCLI(): Command {
 
   program
     .command("gateway")
-    .description("网关管理")
-    .addCommand(
-      new Command("start")
-        .description("启动网关服务")
-        .option("--port <port>", "网关端口", parseInt)
-        .option("--host <host>", "网关主机")
-        .option("--web", "启用Web UI")
-        .option("--web-root <path>", "Web UI静态资源目录")
-        .action(async (opts, cmd) => {
-          const globalOpts = cmd.optsWithGlobals();
-          applyGlobalOptions(globalOpts);
+    .description("启动Web网关服务")
+    .option("--web", "同时启动Web前端（开发模式）")
+    .option("--prod", "生产模式（内嵌前端静态资源）")
+    .option("--port <port>", "网关端口", parseInt)
+    .option("--host <host>", "网关主机")
+    .action(async (opts, cmd) => {
+      const globalOpts = cmd.optsWithGlobals();
+      applyGlobalOptions(globalOpts);
 
-          const app = new LotteApp();
-          setupShutdownHandlers(app);
+      const launcher = new GatewayLauncher();
 
-          try {
-            await app.start();
+      try {
+        await launcher.start({
+          host: opts.host ?? "127.0.0.1",
+          port: opts.port ?? 10623,
+          webDev: opts.web ?? false,
+          prod: opts.prod ?? false,
+          stateDir: resolveStateDir(),
+          logLevel: globalOpts.logLevel ?? "info",
+        });
 
-            if (opts.web) {
-              const configLoader = app.getConfig();
-              const gatewayConfig = { ...configLoader.getGateway() };
-              gatewayConfig.web = {
-                ...gatewayConfig.web,
-                enabled: true,
-                root: opts.webRoot || gatewayConfig.web?.root || "",
-              };
-              await configLoader.saveGateway(gatewayConfig);
-              logger.info("Web UI enabled");
-            }
-
-            if (opts.port) {
-              const configLoader = app.getConfig();
-              const gatewayConfig = { ...configLoader.getGateway(), port: opts.port };
-              if (opts.host) gatewayConfig.host = opts.host;
-              await configLoader.saveGateway(gatewayConfig);
-            }
-
-            logger.info("Lotte Gateway is running. Press Ctrl+C to stop.");
-          } catch (error) {
-            logger.error("Failed to start Lotte Gateway", error);
-            process.exit(1);
-          }
-        }),
-    )
-    .addCommand(
-      new Command("status")
-        .description("查看网关状态")
-        .action(async () => {
-          try {
-            const stateDir = resolveStateDir();
-            const configFile = path.join(stateDir, "config", "gateway.json");
-            if (!fs.existsSync(configFile)) {
-              console.log("Gateway config not found. Run 'lotte init' first.");
-              return;
-            }
-            const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
-            console.log(`Host: ${config.host || "127.0.0.1"}`);
-            console.log(`Port: ${config.port || 10623}`);
-            console.log(`Auth mode: ${config.auth?.mode || "none"}`);
-            console.log(`Web UI: ${config.web?.enabled ? "enabled" : "disabled"}`);
-            if (config.web?.enabled) {
-              console.log(`Web UI root: ${config.web.root || "(auto-detect)"}`);
-            }
-          } catch (error) {
-            console.error("Failed to get gateway status:", error);
-          }
-        }),
-    );
+        logger.info("Lotte Gateway is running. Press Ctrl+C to stop.");
+      } catch (error) {
+        logger.error("Failed to start gateway", error);
+        process.exit(1);
+      }
+    });
 
   program
     .command("chat")

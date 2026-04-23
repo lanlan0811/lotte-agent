@@ -1,6 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { GatewayConfig } from "../config/schema.js";
 import type { LotteApp } from "../app.js";
 import type { PluginRegistry, PluginLoader } from "../plugins/index.js";
@@ -99,11 +102,63 @@ export class Gateway {
 
     const webConfig = config.web || { enabled: false, root: "", base_path: "" };
     if (webConfig.enabled) {
-      registerWebUiRoutes(
-        this.fastify,
-        webConfig,
-        `http://${config.host}:${config.port}`,
-      );
+      const webRoot = this.resolveWebRoot(webConfig.root);
+      if (webRoot) {
+        await this.fastify.register(fastifyStatic, {
+          root: webRoot,
+          prefix: "/",
+          decorateReply: false,
+          wildcard: false,
+          serve: false,
+        });
+
+        this.fastify.get("/*", async (request: FastifyRequest, reply: FastifyReply) => {
+          const urlPath = request.url.split("?")[0] || "/";
+          if (urlPath.startsWith("/api/") || urlPath.startsWith("/v1/") || urlPath === "/ws") {
+            reply.status(404).send({
+              ok: false,
+              error: { code: "NOT_FOUND", message: "Route not found", details: null },
+            });
+            return;
+          }
+
+          const relPath = urlPath === "/" ? "index.html" : urlPath.slice(1);
+          const filePath = path.join(webRoot, relPath);
+
+          try {
+            const realPath = fs.realpathSync(filePath);
+            if (!realPath.startsWith(webRoot)) {
+              reply.status(403).send("Forbidden");
+              return;
+            }
+            if (fs.existsSync(realPath) && fs.statSync(realPath).isFile()) {
+              reply.sendFile(relPath);
+              return;
+            }
+          } catch {
+            // fall through to SPA fallback
+          }
+
+          const indexPath = path.join(webRoot, "index.html");
+          if (fs.existsSync(indexPath)) {
+            reply.sendFile("index.html");
+            return;
+          }
+
+          reply.status(404).send({
+            ok: false,
+            error: { code: "NOT_FOUND", message: "Not found", details: null },
+          });
+        });
+
+        logger.info(`Serving static web from: ${webRoot} (via @fastify/static)`);
+      } else {
+        registerWebUiRoutes(
+          this.fastify,
+          webConfig,
+          `http://${config.host}:${config.port}`,
+        );
+      }
     }
 
     this.wsManager = new WebSocketManager(this.deps, this.eventEmitter);
@@ -149,5 +204,38 @@ export class Gateway {
 
   getAddress(): string {
     return `http://${this.deps.config.host}:${this.deps.config.port}`;
+  }
+
+  private resolveWebRoot(configuredRoot: string): string | null {
+    if (configuredRoot) {
+      try {
+        const real = fs.realpathSync(configuredRoot);
+        if (fs.statSync(real).isDirectory() && fs.existsSync(path.join(real, "index.html"))) {
+          return real;
+        }
+      } catch {
+        // fall through
+      }
+      logger.warn(`Configured Web UI root not found or invalid: ${configuredRoot}`);
+    }
+
+    const candidates = [
+      path.resolve(process.cwd(), "web", "out"),
+      path.resolve(process.cwd(), "Web", "out"),
+      path.resolve(process.argv[1] ?? process.cwd(), "..", "web", "out"),
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        const real = fs.realpathSync(candidate);
+        if (fs.existsSync(path.join(real, "index.html"))) {
+          return real;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    return null;
   }
 }
