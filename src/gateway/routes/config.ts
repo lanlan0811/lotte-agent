@@ -125,4 +125,72 @@ export function registerConfigRoutes(
       },
     });
   });
+
+  fastify.post(`${prefix}/config/probe-multimodal`, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { modelId?: string; timeout?: number };
+
+    if (!body.modelId) {
+      reply.status(400).send({
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "modelId is required",
+          details: null,
+        },
+      });
+      return;
+    }
+
+    try {
+      const modelManager = deps.app.getModelManager();
+      const result = await modelManager.probeModelMultimodal(body.modelId, body.timeout);
+
+      reply.send({
+        ok: true,
+        data: {
+          modelId: body.modelId,
+          supportsImage: result.supportsImage,
+          supportsVideo: result.supportsVideo,
+          supportsMultimodal: result.supportsImage || result.supportsVideo,
+          imageMessage: result.imageMessage,
+          videoMessage: result.videoMessage,
+        },
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      reply.status(500).send({
+        ok: false,
+        error: { code: "PROBE_ERROR", message: msg, details: null },
+      });
+    }
+  });
+
+  fastify.get(`${prefix}/config/multimodal-cache`, async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const modelManager = deps.app.getModelManager();
+      const prober = modelManager.getMultimodalProber();
+      const models = modelManager.listAllModels();
+      const cache: Record<string, unknown> = {};
+
+      for (const model of models) {
+        const qualifiedId = `${model.provider}/${model.id}`;
+        const cached = prober.getCached(qualifiedId);
+        if (cached) {
+          cache[qualifiedId] = {
+            supportsImage: cached.supportsImage,
+            supportsVideo: cached.supportsVideo,
+            supportsMultimodal: cached.supportsImage || cached.supportsVideo,
+          };
+        }
+      }
+
+      reply.send({ ok: true, data: cache });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      reply.status(500).send({
+        ok: false,
+        error: { code: "CACHE_ERROR", message: msg, details: null },
+      });
+    }
+  });
 }

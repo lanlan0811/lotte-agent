@@ -11,6 +11,7 @@ import { AnthropicProvider } from "./anthropic-provider.js";
 import { CustomProvider } from "./custom-provider.js";
 import { GeminiProvider } from "./gemini-provider.js";
 import { ProviderRateLimiterRegistry } from "./rate-limiter.js";
+import { MultimodalProber } from "./multimodal-prober.js";
 import { logger } from "../utils/logger.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128000;
@@ -22,6 +23,7 @@ export class ModelManager {
   private defaultProvider: string;
   private defaultModel: string;
   private rateLimiterRegistry: ProviderRateLimiterRegistry;
+  private multimodalProber: MultimodalProber;
 
   constructor(aiConfig: AIConfig) {
     this.defaultProvider = aiConfig.default_provider;
@@ -50,6 +52,8 @@ export class ModelManager {
     for (const [alias, target] of Object.entries(aiConfig.model_aliases)) {
       this.modelAliases.set(alias, target);
     }
+
+    this.multimodalProber = new MultimodalProber(this);
   }
 
   private createProvider(
@@ -208,6 +212,14 @@ export class ModelManager {
 
   listProviders(): string[] {
     return Array.from(this.providers.keys());
+  }
+
+  getMultimodalProber(): MultimodalProber {
+    return this.multimodalProber;
+  }
+
+  async probeModelMultimodal(modelId: string, timeout?: number): Promise<import("./multimodal-prober.js").ProbeResult> {
+    return this.multimodalProber.probe(modelId, timeout);
   }
 
   private resolveProviderAndModel(modelId: string): { provider: string; model: string } {

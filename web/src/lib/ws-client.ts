@@ -1,4 +1,5 @@
 const WS_BASE = process.env.NEXT_PUBLIC_WS_BASE || "ws://127.0.0.1:10623";
+const AUTH_STORAGE_KEY = "lotte_ws_auth";
 
 export type WsEventType =
   | "chat.chunk"
@@ -27,7 +28,75 @@ export interface WsEvent {
 }
 
 export type WsEventHandler = (event: WsEvent) => void;
-export type WsStatusHandler = (status: "connecting" | "connected" | "disconnected" | "reconnecting") => void;
+export type WsStatusHandler = (status: "connecting" | "connected" | "disconnected" | "reconnecting" | "authenticating") => void;
+
+interface GatewayFrame {
+  type: "req" | "res" | "event";
+  id?: string;
+  method?: string;
+  params?: unknown;
+  ok?: boolean;
+  payload?: unknown;
+  error?: { code: string; message: string };
+  event?: string;
+  seq?: number;
+}
+
+interface ChallengeFrame {
+  type: "challenge";
+  protocol: number;
+  nonce: string;
+  methods: string[];
+  timeoutMs: number;
+}
+
+interface HelloOkFrame {
+  type: "hello-ok";
+  protocol: number;
+  server: { version: string; connId: string };
+  features: Record<string, unknown>;
+  policy: Record<string, unknown>;
+}
+
+interface AuthCredentials {
+  mode: "token" | "password" | "none";
+  token?: string;
+  password?: string;
+}
+
+function loadCredentials(): AuthCredentials {
+  if (typeof window === "undefined") return { mode: "none" };
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as AuthCredentials;
+  } catch {}
+  return { mode: "none" };
+}
+
+function saveCredentials(creds: AuthCredentials): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(creds));
+  } catch {}
+}
+
+async function computeHmacSha256(key: string, message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(key);
+  const msgData = encoder.encode(message);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, msgData);
+  const hashArray = Array.from(new Uint8Array(signature));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export class WebSocketClient {
   private ws: WebSocket | null = null;
@@ -44,7 +113,11 @@ export class WebSocketClient {
   private lastPongTime = 0;
   private missedHeartbeats = 0;
   private maxMissedHeartbeats = 3;
-  private _status: "connecting" | "connected" | "disconnected" | "reconnecting" = "disconnected";
+  private _status: "connecting" | "connected" | "disconnected" | "reconnecting" | "authenticating" = "disconnected";
+  private handshakeComplete = false;
+  private pendingChallenge: ChallengeFrame | null = null;
+  private requestId = 0;
+  private connId: string | null = null;
 
   constructor(url?: string) {
     this.url = url || `${WS_BASE}/ws`;
@@ -53,6 +126,8 @@ export class WebSocketClient {
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) return;
     this.intentionalClose = false;
+    this.handshakeComplete = false;
+    this.pendingChallenge = null;
     this.setStatus("connecting");
 
     try {
@@ -61,9 +136,6 @@ export class WebSocketClient {
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
         this.missedHeartbeats = 0;
-        this.startHeartbeat();
-        this.flushQueue();
-        this.setStatus("connected");
       };
 
       this.ws.onmessage = (event) => {
@@ -76,13 +148,15 @@ export class WebSocketClient {
             return;
           }
 
-          const parsed = JSON.parse(data) as WsEvent;
-          this.dispatch(parsed);
+          const frame = JSON.parse(data) as GatewayFrame;
+          this.handleFrame(frame);
         } catch {}
       };
 
       this.ws.onclose = (event) => {
         this.stopHeartbeat();
+        this.handshakeComplete = false;
+        this.pendingChallenge = null;
         this.setStatus("disconnected");
 
         if (!this.intentionalClose && event.code !== 1000) {
@@ -107,16 +181,42 @@ export class WebSocketClient {
     }
     this.ws?.close(1000, "Client disconnect");
     this.ws = null;
+    this.handshakeComplete = false;
+    this.pendingChallenge = null;
     this.setStatus("disconnected");
+  }
+
+  setCredentials(mode: "token" | "password" | "none", secret?: string): void {
+    const creds: AuthCredentials = { mode };
+    if (mode === "token" && secret) creds.token = secret;
+    if (mode === "password" && secret) creds.password = secret;
+    saveCredentials(creds);
+  }
+
+  getCredentials(): AuthCredentials {
+    return loadCredentials();
+  }
+
+  clearCredentials(): void {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
   }
 
   send(data: unknown): void {
     const payload = typeof data === "string" ? data : JSON.stringify(data);
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN && this.handshakeComplete) {
       this.ws.send(payload);
     } else {
       this.messageQueue.push(payload);
     }
+  }
+
+  sendRequest(method: string, params?: unknown): string {
+    const id = `req_${++this.requestId}`;
+    const frame: GatewayFrame = { type: "req", id, method, params };
+    this.send(frame);
+    return id;
   }
 
   on(eventType: WsEventType | "*", handler: WsEventHandler): () => void {
@@ -141,19 +241,122 @@ export class WebSocketClient {
   }
 
   get connected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ws?.readyState === WebSocket.OPEN && this.handshakeComplete;
   }
 
-  get status(): "connecting" | "connected" | "disconnected" | "reconnecting" {
+  get status(): "connecting" | "connected" | "disconnected" | "reconnecting" | "authenticating" {
     return this._status;
   }
 
-  private setStatus(status: "connecting" | "connected" | "disconnected" | "reconnecting"): void {
+  get isAuthenticated(): boolean {
+    return this.handshakeComplete;
+  }
+
+  getConnId(): string | null {
+    return this.connId;
+  }
+
+  private setStatus(status: "connecting" | "connected" | "disconnected" | "reconnecting" | "authenticating"): void {
     this._status = status;
     for (const handler of this.statusListeners) {
       try {
         handler(status);
       } catch {}
+    }
+  }
+
+  private handleFrame(frame: GatewayFrame): void {
+    if (frame.type === "res" && frame.payload) {
+      const payload = frame.payload as Record<string, unknown>;
+
+      if (payload.type === "challenge") {
+        this.handleChallenge(payload as unknown as ChallengeFrame);
+        return;
+      }
+
+      if (payload.type === "hello-ok") {
+        this.handleHelloOk(payload as unknown as HelloOkFrame);
+        return;
+      }
+    }
+
+    if (frame.type === "res" && !frame.ok && frame.error) {
+      if (frame.error.code === "AUTH_REQUIRED" || frame.error.code === "AUTH_FAILED") {
+        this.handshakeComplete = false;
+        this.setStatus("authenticating");
+        return;
+      }
+    }
+
+    if (frame.type === "event" && frame.event) {
+      const wsEvent: WsEvent = {
+        type: frame.event as WsEventType,
+        data: (frame.payload as Record<string, unknown>) ?? {},
+        timestamp: Date.now(),
+      };
+      this.dispatch(wsEvent);
+    }
+  }
+
+  private async handleChallenge(challenge: ChallengeFrame): Promise<void> {
+    this.pendingChallenge = challenge;
+    this.setStatus("authenticating");
+
+    const creds = loadCredentials();
+
+    if (creds.mode === "none") {
+      this.sendConnectRequest(undefined, undefined);
+      return;
+    }
+
+    const secret = creds.mode === "token" ? creds.token : creds.password;
+    if (!secret) {
+      this.sendConnectRequest(undefined, undefined);
+      return;
+    }
+
+    try {
+      const challengeResponse = await computeHmacSha256(secret, challenge.nonce);
+      const method = creds.mode === "token" ? "hmac-token" : "hmac-password";
+      this.sendConnectRequest(
+        { challengeResponse, method },
+        { id: "web-client", version: "0.1.0", platform: "web", mode: "default" },
+      );
+    } catch {
+      this.sendConnectRequest(
+        { [creds.mode]: secret },
+        { id: "web-client", version: "0.1.0", platform: "web", mode: "default" },
+      );
+    }
+  }
+
+  private handleHelloOk(hello: HelloOkFrame): void {
+    this.handshakeComplete = true;
+    this.connId = hello.server.connId;
+    this.startHeartbeat();
+    this.flushQueue();
+    this.setStatus("connected");
+  }
+
+  private sendConnectRequest(
+    auth?: { challengeResponse?: string; method?: string; token?: string; password?: string },
+    client?: { id: string; version: string; platform: string; mode: string },
+  ): void {
+    const id = `req_${++this.requestId}`;
+    const params: Record<string, unknown> = {};
+
+    if (auth) {
+      params.auth = auth;
+    }
+    if (client) {
+      params.client = client;
+    }
+
+    const frame: GatewayFrame = { type: "req", id, method: "connect", params };
+    const payload = JSON.stringify(frame);
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(payload);
     }
   }
 

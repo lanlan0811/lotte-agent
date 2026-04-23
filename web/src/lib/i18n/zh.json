@@ -62,10 +62,18 @@
     "send": "发送",
     "thinking": "思考中...",
     "toolCall": "工具调用",
+    "toolCallArgs": "参数",
     "toolResult": "工具结果",
     "copyCode": "复制代码",
     "regenerate": "重新生成",
-    "clearHistory": "清空历史"
+    "clearHistory": "清空历史",
+    "reconnecting": "重新连接中...",
+    "connecting": "连接中...",
+    "timeoutError": "请求超时，服务器可能仍在处理您的请求。",
+    "networkError": "无法连接到服务器。",
+    "unexpectedError": "发生了意外错误。",
+    "retryFailed": "重试失败，请再试一次。",
+    "authenticating": "认证中..."
   },
   "sessions": {
     "title": "会话列表",
@@ -85,7 +93,10 @@
     "sortByName": "名称",
     "sortByMessages": "消息数",
     "rename": "重命名",
-    "renameTitle": "重命名会话"
+    "renameTitle": "重命名会话",
+    "batchDeleteTitle": "批量删除会话",
+    "batchDeleteConfirm": "确定要删除选中的会话吗？此操作不可撤销。",
+    "detailTitle": "会话详情"
   },
   "skills": {
     "title": "技能管理",
@@ -197,7 +208,9 @@
     "page": "页",
     "details": "详情",
     "copyMessage": "复制消息",
-    "categoryAll": "全部分类"
+    "categoryAll": "全部分类",
+    "liveModeOff": "实时",
+    "clearConfirm": "确定要清空所有日志吗？此操作不可撤销。"
   },
   "config": {
     "title": "系统设置",
@@ -260,7 +273,14 @@
     "fileSize": "文件大小",
     "chunkSize": "分块大小",
     "overlap": "重叠",
-    "embedModel": "嵌入模型"
+    "embedModel": "嵌入模型",
+    "viewChunks": "查看分块",
+    "reindex": "重新索引",
+    "reindexing": "重新索引中...",
+    "batchDeleteConfirm": "确定要删除选中的文档吗？此操作不可撤销。",
+    "chunkDetails": "分块详情",
+    "chunk": "分块",
+    "tokens": "令牌"
   },
   "notification": {
     "title": "通知管理",
@@ -269,11 +289,28 @@
     "email": "邮件",
     "rules": "通知规则",
     "addRule": "添加规则",
+    "editRule": "编辑规则",
     "eventType": "事件类型",
     "channels": "通知通道",
     "enabled": "已启用",
     "test": "测试通知",
     "testSuccess": "测试通知发送成功",
-    "testFailed": "测试通知发送失败"
+    "testFailed": "测试通知发送失败",
+    "webhookMethod": "请求方法",
+    "emailTo": "收件人",
+    "createdAt": "创建时间",
+    "ruleNamePlaceholder": "请输入规则名称",
+    "eventTypeHelp": "逗号分隔的事件类型模式（如 cron.*, channel.message）",
+    "channelIdPlaceholder": "通道ID（可选）",
+    "deleteRuleConfirm": "确定要删除此通知规则吗？此操作不可撤销。",
+    "validation": {
+      "nameRequired": "规则名称为必填项",
+      "nameTooLong": "名称不能超过64个字符",
+      "eventTypesRequired": "至少需要一个事件类型",
+      "invalidPattern": "无效的模式",
+      "targetRequired": "此通道类型需要填写目标",
+      "invalidEmail": "无效的邮箱地址",
+      "invalidUrl": "无效的URL格式"
+    }
   }
 }

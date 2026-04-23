@@ -62,10 +62,18 @@
     "send": "Send",
     "thinking": "Thinking...",
     "toolCall": "Tool Call",
+    "toolCallArgs": "Arguments",
     "toolResult": "Tool Result",
     "copyCode": "Copy Code",
     "regenerate": "Regenerate",
-    "clearHistory": "Clear History"
+    "clearHistory": "Clear History",
+    "reconnecting": "Reconnecting...",
+    "connecting": "Connecting...",
+    "timeoutError": "Request timed out. The server may be processing your request.",
+    "networkError": "Unable to connect to the server.",
+    "unexpectedError": "An unexpected error occurred.",
+    "retryFailed": "Retry failed. Please try again.",
+    "authenticating": "Authenticating..."
   },
   "sessions": {
     "title": "Sessions",
@@ -85,7 +93,10 @@
     "sortByName": "Name",
     "sortByMessages": "Messages",
     "rename": "Rename",
-    "renameTitle": "Rename Session"
+    "renameTitle": "Rename Session",
+    "batchDeleteTitle": "Batch Delete Sessions",
+    "batchDeleteConfirm": "Are you sure you want to delete the selected sessions? This action cannot be undone.",
+    "detailTitle": "Session Details"
   },
   "skills": {
     "title": "Skills",
@@ -197,7 +208,9 @@
     "page": "Page",
     "details": "Details",
     "copyMessage": "Copy Message",
-    "categoryAll": "All Categories"
+    "categoryAll": "All Categories",
+    "liveModeOff": "Live",
+    "clearConfirm": "Are you sure you want to clear all logs? This action cannot be undone."
   },
   "config": {
     "title": "Settings",
@@ -260,7 +273,14 @@
     "fileSize": "File Size",
     "chunkSize": "Chunk Size",
     "overlap": "Overlap",
-    "embedModel": "Embedding Model"
+    "embedModel": "Embedding Model",
+    "viewChunks": "View Chunks",
+    "reindex": "Re-index",
+    "reindexing": "Re-indexing...",
+    "batchDeleteConfirm": "Are you sure you want to delete the selected documents? This action cannot be undone.",
+    "chunkDetails": "Chunk Details",
+    "chunk": "Chunk",
+    "tokens": "tokens"
   },
   "notification": {
     "title": "Notifications",
@@ -269,11 +289,28 @@
     "email": "Email",
     "rules": "Notification Rules",
     "addRule": "Add Rule",
+    "editRule": "Edit Rule",
     "eventType": "Event Type",
     "channels": "Channels",
     "enabled": "Enabled",
     "test": "Test",
     "testSuccess": "Test notification sent successfully",
-    "testFailed": "Test notification failed"
+    "testFailed": "Test notification failed",
+    "webhookMethod": "Method",
+    "emailTo": "Recipients",
+    "createdAt": "Created",
+    "ruleNamePlaceholder": "Enter rule name",
+    "eventTypeHelp": "Comma-separated event type patterns (e.g. cron.*, channel.message)",
+    "channelIdPlaceholder": "Channel ID (optional)",
+    "deleteRuleConfirm": "Are you sure you want to delete this notification rule? This action cannot be undone.",
+    "validation": {
+      "nameRequired": "Rule name is required",
+      "nameTooLong": "Name must be 64 characters or less",
+      "eventTypesRequired": "At least one event type is required",
+      "invalidPattern": "Invalid pattern",
+      "targetRequired": "Target is required for this channel type",
+      "invalidEmail": "Invalid email address",
+      "invalidUrl": "Invalid URL format"
+    }
   }
 }

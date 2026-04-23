@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Database, Upload, Search, Trash2, RefreshCw, FileText, Eye,
-  Loader2, CheckSquare, Square, X,
+  Loader2, CheckSquare, Square, X, RotateCcw, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
@@ -39,6 +39,12 @@ interface SearchResult {
   chunkIndex: number;
 }
 
+interface ChunkDetail {
+  index: number;
+  content: string;
+  tokenCount: number;
+}
+
 interface UploadProgress {
   fileName: string;
   progress: number;
@@ -52,8 +58,14 @@ export function RagView() {
   const [isSearching, setIsSearching] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<RagDocument | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<RagDocument | null>(null);
   const [previewContent, setPreviewContent] = useState<string>("");
+  const [chunkDoc, setChunkDoc] = useState<RagDocument | null>(null);
+  const [chunks, setChunks] = useState<ChunkDetail[]>([]);
+  const [isLoadingChunks, setIsLoadingChunks] = useState(false);
+  const [expandedChunks, setExpandedChunks] = useState<Set<number>>(new Set());
+  const [reindexingIds, setReindexingIds] = useState<Set<string>>(new Set());
   const [uploadProgresses, setUploadProgresses] = useState<UploadProgress[]>([]);
   const [stats, setStats] = useState({ documentCount: 0, chunkCount: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -167,6 +179,7 @@ export function RagView() {
       await apiClient.delete(`/api/v1/rag/documents/${id}`);
     }
     setSelectedIds(new Set());
+    setBatchDeleteOpen(false);
     await loadDocuments();
     await loadStats();
   };
@@ -179,6 +192,46 @@ export function RagView() {
     } else {
       setPreviewContent("");
     }
+  };
+
+  const handleReindex = async (doc: RagDocument) => {
+    setReindexingIds((prev) => new Set(prev).add(doc.id));
+    try {
+      await apiClient.post(`/api/v1/rag/documents/${doc.id}/reindex`);
+      await loadDocuments();
+      await loadStats();
+    } finally {
+      setReindexingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(doc.id);
+        return next;
+      });
+    }
+  };
+
+  const handleViewChunks = async (doc: RagDocument) => {
+    setChunkDoc(doc);
+    setIsLoadingChunks(true);
+    setExpandedChunks(new Set());
+    const result = await apiClient.get<{ chunks: ChunkDetail[] }>(`/api/v1/rag/documents/${doc.id}/chunks`);
+    if (result.ok && result.data) {
+      setChunks(result.data.chunks || []);
+    } else {
+      setChunks([]);
+    }
+    setIsLoadingChunks(false);
+  };
+
+  const toggleChunkExpand = (index: number) => {
+    setExpandedChunks((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
   };
 
   const toggleSelect = (id: string) => {
@@ -349,7 +402,7 @@ export function RagView() {
                       variant="destructive"
                       size="sm"
                       className="h-7 text-xs gap-1"
-                      onClick={handleBatchDelete}
+                      onClick={() => setBatchDeleteOpen(true)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       {t("rag.batchDelete")}
@@ -402,9 +455,32 @@ export function RagView() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
+                        onClick={() => handleViewChunks(doc)}
+                        title={t("rag.viewChunks") || "View Chunks"}
+                      >
+                        <Database className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
                         onClick={() => handlePreview(doc)}
                       >
                         <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleReindex(doc)}
+                        disabled={reindexingIds.has(doc.id)}
+                        title={t("rag.reindex") || "Re-index"}
+                      >
+                        {reindexingIds.has(doc.id) ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        )}
                       </Button>
                       <Button
                         variant="ghost"
@@ -498,6 +574,25 @@ export function RagView() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("rag.batchDelete") || "Batch Delete"}</DialogTitle>
+            <DialogDescription>
+              {t("rag.batchDeleteConfirm") || `Are you sure you want to delete ${selectedIds.size} selected documents? This action cannot be undone.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBatchDeleteOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={handleBatchDelete}>
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={previewDoc !== null} onOpenChange={(open) => !open && setPreviewDoc(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -513,6 +608,64 @@ export function RagView() {
           </ScrollArea>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewDoc(null)}>
+              {t("common.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={chunkDoc !== null} onOpenChange={(open) => !open && setChunkDoc(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("rag.chunkDetails") || "Chunk Details"} - {chunkDoc?.name}</DialogTitle>
+            <DialogDescription>
+              {chunkDoc?.chunkCount} {t("rag.chunkCount")} · {formatSize(chunkDoc?.size || 0)}
+            </DialogDescription>
+          </DialogHeader>
+          {isLoadingChunks ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">{t("common.loading")}</span>
+            </div>
+          ) : chunks.length > 0 ? (
+            <ScrollArea className="max-h-[500px]">
+              <div className="space-y-1">
+                {chunks.map((chunk) => (
+                  <div key={chunk.index} className="border rounded-md">
+                    <button
+                      className="w-full flex items-center gap-2 p-2.5 hover:bg-muted/50 transition-colors text-left"
+                      onClick={() => toggleChunkExpand(chunk.index)}
+                    >
+                      {expandedChunks.has(chunk.index) ? (
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="text-xs font-medium">
+                        {t("rag.chunk") || "Chunk"} #{chunk.index}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] ml-auto">
+                        {chunk.tokenCount} {t("rag.tokens") || "tokens"}
+                      </Badge>
+                    </button>
+                    {expandedChunks.has(chunk.index) && (
+                      <div className="px-3 pb-2.5 pt-0">
+                        <pre className="text-xs font-mono whitespace-pre-wrap break-all p-2 bg-muted rounded-md max-h-48 overflow-auto">
+                          {chunk.content}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              {t("common.noData")}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChunkDoc(null)}>
               {t("common.close")}
             </Button>
           </DialogFooter>

@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
-  FileText, RefreshCw, Download, ArrowDown, Trash2, Copy, Filter, Loader2,
-  ChevronLeft, ChevronRight,
+  FileText, RefreshCw, Download, Trash2, Copy, Filter, Loader2,
+  ChevronLeft, ChevronRight, Radio, Calendar,
 } from "lucide-react";
 import { useAppStore, type LogEntry } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
+import { wsClient } from "@/lib/ws-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -49,12 +51,33 @@ export function LogsView() {
   const [pageSize, setPageSize] = useState(50);
   const [totalLogs, setTotalLogs] = useState(0);
   const [showDetail, setShowDetail] = useState<LogEntry | null>(null);
+  const [liveMode, setLiveMode] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadLogs();
   }, [page, pageSize, levelFilter, categoryFilter]);
+
+  useEffect(() => {
+    if (!liveMode) return;
+
+    const handler = (event: { type: string; data: Record<string, unknown> }) => {
+      if (event.type === "log.entry" || event.data?.level) {
+        const entry = event.data as unknown as LogEntry;
+        if (entry.timestamp && entry.level && entry.message) {
+          setLogs((prev) => [...prev.slice(-(pageSize - 1)), entry]);
+          setTotalLogs((prev) => prev + 1);
+        }
+      }
+    };
+
+    const unsub = wsClient.on("*", handler);
+    return unsub;
+  }, [liveMode, pageSize, setLogs]);
 
   const loadLogs = useCallback(async () => {
     const params: Record<string, string | number> = {
@@ -64,6 +87,8 @@ export function LogsView() {
     if (levelFilter !== "all") params.level = levelFilter;
     if (categoryFilter !== "all") params.category = categoryFilter;
     if (searchQuery.trim()) params.search = searchQuery.trim();
+    if (dateFrom) params.dateFrom = new Date(dateFrom).getTime();
+    if (dateTo) params.dateTo = new Date(dateTo).getTime() + 86400000;
 
     const result = await apiClient.get<{ logs: LogEntry[]; total: number; categories: string[] }>("/api/v1/logs", params);
     if (result.ok && result.data) {
@@ -73,7 +98,7 @@ export function LogsView() {
         setCategories(result.data.categories);
       }
     }
-  }, [page, pageSize, levelFilter, categoryFilter, searchQuery, setLogs]);
+  }, [page, pageSize, levelFilter, categoryFilter, searchQuery, dateFrom, dateTo, setLogs]);
 
   useEffect(() => {
     if (autoScroll && bottomRef.current) {
@@ -85,6 +110,7 @@ export function LogsView() {
     await apiClient.delete("/api/v1/logs");
     setLogs([]);
     setTotalLogs(0);
+    setClearConfirmOpen(false);
   };
 
   const handleExport = useCallback(() => {
@@ -107,6 +133,15 @@ export function LogsView() {
     navigator.clipboard.writeText(message);
   };
 
+  const toggleLiveMode = () => {
+    setLiveMode((prev) => !prev);
+  };
+
+  const clearDateFilter = () => {
+    setDateFrom("");
+    setDateTo("");
+  };
+
   const totalPages = Math.max(1, Math.ceil(totalLogs / pageSize));
 
   const filteredLogs = searchQuery.trim()
@@ -124,6 +159,15 @@ export function LogsView() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("logs.title")}</h2>
         <div className="flex items-center gap-2">
+          <Button
+            onClick={toggleLiveMode}
+            variant={liveMode ? "default" : "outline"}
+            size="sm"
+            className="gap-1.5"
+          >
+            <Radio className={`h-3.5 w-3.5 ${liveMode ? "animate-pulse" : ""}`} />
+            {liveMode ? t("logs.liveMode") : t("logs.liveModeOff") || "实时"}
+          </Button>
           <Button onClick={loadLogs} variant="outline" size="sm" className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
@@ -131,7 +175,13 @@ export function LogsView() {
             <Download className="h-3.5 w-3.5" />
             {t("logs.export")}
           </Button>
-          <Button onClick={handleClear} variant="outline" size="sm" className="gap-1.5 text-destructive hover:text-destructive" disabled={logs.length === 0}>
+          <Button
+            onClick={() => setClearConfirmOpen(true)}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-destructive hover:text-destructive"
+            disabled={logs.length === 0}
+          >
             <Trash2 className="h-3.5 w-3.5" />
             {t("logs.clear")}
           </Button>
@@ -178,6 +228,28 @@ export function LogsView() {
           />
         </div>
 
+        <div className="flex items-center gap-1.5">
+          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-7 text-xs w-32"
+          />
+          <span className="text-xs text-muted-foreground">-</span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-7 text-xs w-32"
+          />
+          {(dateFrom || dateTo) && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearDateFilter}>
+              ×
+            </Button>
+          )}
+        </div>
+
         <div className="flex items-center gap-1.5 ml-auto">
           <Switch checked={autoScroll} onCheckedChange={setAutoScroll} />
           <span className="text-xs text-muted-foreground">{t("logs.autoScroll")}</span>
@@ -187,6 +259,7 @@ export function LogsView() {
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {t("logs.showing")} {filteredLogs.length} {t("logs.of")} {totalLogs} {t("logs.totalLogs")}
+          {liveMode && <Badge variant="default" className="ml-2 text-[10px] px-1.5 py-0 animate-pulse">LIVE</Badge>}
         </span>
         <div className="flex items-center gap-2">
           <span>{t("logs.pageSize")}:</span>
@@ -204,7 +277,7 @@ export function LogsView() {
       </div>
 
       <div ref={scrollRef} className="border rounded-md bg-background overflow-hidden">
-        <ScrollArea className="h-[calc(100vh-320px)]">
+        <ScrollArea className="h-[calc(100vh-340px)]">
           {filteredLogs.length > 0 ? (
             <div className="divide-y">
               {filteredLogs.map((log, idx) => (
@@ -258,31 +331,33 @@ export function LogsView() {
         </ScrollArea>
       </div>
 
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {t("logs.page")} {page} / {totalPages}
-        </span>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => setPage(Math.max(1, page - 1))}
-            disabled={page <= 1}
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => setPage(Math.min(totalPages, page + 1))}
-            disabled={page >= totalPages}
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
+      {!liveMode && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {t("logs.page")} {page} / {totalPages}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <Dialog open={showDetail !== null} onOpenChange={(open) => !open && setShowDetail(null)}>
         <DialogContent className="max-w-lg">
@@ -318,6 +393,23 @@ export function LogsView() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDetail(null)}>
               {t("common.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("logs.clear")}</DialogTitle>
+            <DialogDescription>{t("logs.clearConfirm") || "确定要清空所有日志吗？此操作不可撤销。"}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setClearConfirmOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={handleClear}>
+              {t("logs.clear")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { MessageSquare, Trash2, Plus, Search, Pencil, Check, X, ArrowUpDown, Clock, RotateCcw } from "lucide-react";
+import {
+  MessageSquare, Trash2, Plus, Search, Pencil, Check, X, ArrowUpDown,
+  Clock, RotateCcw, CheckSquare, Square, Info,
+} from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
@@ -25,9 +28,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
 type SortField = "updatedAt" | "createdAt" | "title" | "messageCount";
 type SortOrder = "asc" | "desc";
+
+interface SessionDetail {
+  id: string;
+  title: string;
+  model: string;
+  maxTurns: number;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+  status: string;
+}
 
 export function SessionsView() {
   const { sessions, setSessions, setActiveSessionId, removeSession, setActiveView } = useAppStore();
@@ -37,6 +52,9 @@ export function SessionsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<SessionDetail | null>(null);
 
   useEffect(() => {
     loadSessions();
@@ -68,7 +86,21 @@ export function SessionsView() {
   const handleDelete = async (id: string) => {
     await apiClient.delete(`/api/v1/sessions/${id}`);
     removeSession(id);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     setDeleteTarget(null);
+  };
+
+  const handleBatchDelete = async () => {
+    for (const id of selectedIds) {
+      await apiClient.delete(`/api/v1/sessions/${id}`);
+      removeSession(id);
+    }
+    setSelectedIds(new Set());
+    setBatchDeleteOpen(false);
   };
 
   const handleRename = async (id: string) => {
@@ -105,6 +137,33 @@ export function SessionsView() {
 
   const toggleSortOrder = () => {
     setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredSessions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredSessions.map((s) => s.id)));
+    }
+  };
+
+  const handleShowDetail = async (id: string) => {
+    const result = await apiClient.get<SessionDetail>(`/api/v1/sessions/${id}`);
+    if (result.ok && result.data) {
+      setDetailTarget(result.data);
+    }
   };
 
   const filteredSessions = sessions
@@ -209,6 +268,37 @@ export function SessionsView() {
         )}
       </div>
 
+      {sessions.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={toggleSelectAll}>
+            {selectedIds.size === filteredSessions.length && filteredSessions.length > 0 ? (
+              <CheckSquare className="h-3.5 w-3.5" />
+            ) : (
+              <Square className="h-3.5 w-3.5" />
+            )}
+            {selectedIds.size === filteredSessions.length && filteredSessions.length > 0
+              ? t("rag.deselectAll") || "取消全选"
+              : t("rag.selectAll") || "全选"}
+          </Button>
+          {selectedIds.size > 0 && (
+            <>
+              <Badge variant="secondary" className="text-xs">
+                {t("rag.selected") || "已选择"}: {selectedIds.size}
+              </Badge>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => setBatchDeleteOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("rag.batchDelete") || "批量删除"}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {sessions.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
@@ -220,15 +310,31 @@ export function SessionsView() {
           <p>{t("sessions.noResults") || "未找到匹配的会话"}</p>
         </div>
       ) : (
-        <ScrollArea className="h-[calc(100vh-260px)]">
+        <ScrollArea className="h-[calc(100vh-300px)]">
           <div className="space-y-2">
             {filteredSessions.map((session) => (
               <Card
                 key={session.id}
-                className="cursor-pointer hover:bg-accent/50 transition-colors group"
+                className={cn(
+                  "cursor-pointer hover:bg-accent/50 transition-colors group",
+                  selectedIds.has(session.id) && "ring-1 ring-primary/50 bg-primary/5",
+                )}
                 onClick={() => handleOpen(session.id)}
               >
                 <CardContent className="flex items-center gap-3 p-4">
+                  <button
+                    className="shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSelect(session.id);
+                    }}
+                  >
+                    {selectedIds.has(session.id) ? (
+                      <CheckSquare className="h-4 w-4 text-primary" />
+                    ) : (
+                      <Square className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
                     <MessageSquare className="h-4 w-4" />
                   </div>
@@ -282,6 +388,17 @@ export function SessionsView() {
                       className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
                         e.stopPropagation();
+                        handleShowDetail(session.id);
+                      }}
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
                         startEditing(session.id, session.title);
                       }}
                     >
@@ -327,6 +444,79 @@ export function SessionsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.batchDeleteTitle") || "批量删除会话"}</DialogTitle>
+            <DialogDescription>
+              {t("sessions.batchDeleteConfirm") || `确定要删除选中的 ${selectedIds.size} 个会话吗？此操作不可撤销。`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBatchDeleteOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={handleBatchDelete}>
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={detailTarget !== null} onOpenChange={(open) => !open && setDetailTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("sessions.detailTitle") || "会话详情"}</DialogTitle>
+          </DialogHeader>
+          {detailTarget && (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-muted-foreground text-xs">{t("common.name")}</span>
+                  <p className="font-medium truncate">{detailTarget.title}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">ID</span>
+                  <p className="font-mono text-xs truncate">{detailTarget.id}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">{t("config.model")}</span>
+                  <p className="truncate">{detailTarget.model || "-"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">{t("common.status")}</span>
+                  <Badge variant={detailTarget.status === "active" ? "default" : "secondary"} className="text-xs">
+                    {detailTarget.status || "unknown"}
+                  </Badge>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">{t("sessions.messages")}</span>
+                  <p>{detailTarget.messageCount}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">{t("sessions.sortByCreated")}</span>
+                  <p>{new Date(detailTarget.createdAt).toLocaleString()}</p>
+                </div>
+              </div>
+              <Separator />
+              <div>
+                <span className="text-muted-foreground text-xs">{t("sessions.sortByUpdated")}</span>
+                <p>{new Date(detailTarget.updatedAt).toLocaleString()}</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailTarget(null)}>
+              {t("common.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function cn(...inputs: (string | boolean | undefined | null)[]) {
+  return inputs.filter(Boolean).join(" ");
 }
