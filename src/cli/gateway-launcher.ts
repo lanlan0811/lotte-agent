@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
 import { LotteApp } from "../app.js";
 import { logger, type LogLevel } from "../utils/logger.js";
 
@@ -53,7 +54,6 @@ export class GatewayLauncher {
 
       if (opts.prod && !opts.webDev) {
         const webRoot = resolveProdWebRoot();
-        const fs = await import("node:fs");
         if (!fs.existsSync(webRoot)) {
           logger.warn(
             `Web static directory not found: ${webRoot}. Run 'cd web && npm run build' first.`,
@@ -71,7 +71,6 @@ export class GatewayLauncher {
 
   private startWebDevServer(opts: GatewayLauncherOptions): void {
     const webDir = resolveWebDir();
-    const fs = require("node:fs") as typeof import("node:fs");
 
     if (!fs.existsSync(webDir)) {
       logger.error(`Web directory not found: ${webDir}`);
@@ -161,7 +160,6 @@ function resolveWebDir(): string {
 
   for (const candidate of candidates) {
     try {
-      const fs = require("node:fs") as typeof import("node:fs");
       if (fs.existsSync(path.join(candidate, "package.json"))) {
         return candidate;
       }
@@ -183,7 +181,6 @@ function resolveProdWebRoot(): string {
 
   for (const candidate of candidates) {
     try {
-      const fs = require("node:fs") as typeof import("node:fs");
       if (fs.existsSync(candidate)) {
         return candidate;
       }
