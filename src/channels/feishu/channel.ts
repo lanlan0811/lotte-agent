@@ -63,6 +63,10 @@ export class FeishuChannel extends BaseChannel {
     this.dataDir = dir;
   }
 
+  setDatabase(db: Database): void {
+    this.db = db;
+  }
+
   override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
     const chatId = meta?.feishu_chat_id as string | undefined;
     if (chatId) return `feishu:chat:${chatId}`;
@@ -454,13 +458,38 @@ export class FeishuChannel extends BaseChannel {
       updatedAt: Date.now(),
     });
     this.saveReceiveIdStoreToDisk();
+    if (this.db) {
+      try {
+        this.db.saveReceiveId(sessionId, this.channelType, receiveIdType, receiveId);
+      } catch (error) {
+        logger.debug(`Feishu save receive_id to DB failed: ${error}`);
+      }
+    }
   }
 
   private loadReceiveId(sessionId: string): ReceiveIdEntry | undefined {
     const cached = this.receiveIdStore.get(sessionId);
     if (cached) return cached;
     this.loadReceiveIdStoreFromDisk();
-    return this.receiveIdStore.get(sessionId);
+    const fromFile = this.receiveIdStore.get(sessionId);
+    if (fromFile) return fromFile;
+    if (this.db) {
+      try {
+        const fromDb = this.db.loadReceiveId(sessionId, this.channelType);
+        if (fromDb) {
+          const entry: ReceiveIdEntry = {
+            receiveIdType: fromDb.receiveIdType,
+            receiveId: fromDb.receiveId,
+            updatedAt: Date.now(),
+          };
+          this.receiveIdStore.set(sessionId, entry);
+          return entry;
+        }
+      } catch (error) {
+        logger.debug(`Feishu load receive_id from DB failed: ${error}`);
+      }
+    }
+    return undefined;
   }
 
   getReceiveId(sessionId: string): { receiveIdType: string; receiveId: string } | undefined {

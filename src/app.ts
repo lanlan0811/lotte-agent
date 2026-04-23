@@ -181,7 +181,7 @@ export class LotteApp {
         }
       },
     );
-    this.channelManager.setDatabase(this.database);
+    this.channelManager.setDatabase(this.db!);
 
     const consoleChannel = new ConsoleChannel(async (msg) => {
       try {
@@ -242,6 +242,7 @@ export class LotteApp {
         channelsConfig.feishu,
       );
       feishuChannel.setDataDir(this.config.getPaths().dataDir);
+      feishuChannel.setDatabase(this.db!);
       this.channelManager.register(feishuChannel);
     }
 
@@ -258,7 +259,11 @@ export class LotteApp {
       },
       sendChannelMessage: async (channelId, toHandle, text) => {
         try {
-          await this.channelManager?.sendCrossChannel(channelId, toHandle, text);
+          try {
+            await this.channelManager?.sendToSession(toHandle, text);
+          } catch {
+            await this.channelManager?.sendCrossChannel(channelId, toHandle, text);
+          }
         } catch (error) {
           logger.error(`Automation channel send error: ${error}`);
         }
