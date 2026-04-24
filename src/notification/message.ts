@@ -57,8 +57,8 @@ export class MessageNotifier {
 
   private getEventEmoji(type: string): string {
     const emojiMap: Record<string, string> = {
-      "cron.complete": "�?,
-      "cron.error": "�?,
+      "cron.complete": "✅",
+      "cron.error": "❌",
       "approval.request": "🔔",
       "approval.resolved": "✔️",
       "channel.status": "📡",

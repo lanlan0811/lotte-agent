@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ToolDefinition } from "../tool-registry.js";
 import { logger } from "../../utils/logger.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 const MAX_READ_SIZE = 1024 * 1024;
 const DEFAULT_READ_LINES = 2000;
@@ -105,7 +106,7 @@ export const readTool: ToolDefinition = {
 
       return `${header}\n${range}\n${numberedLines.join("\n")}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error reading file: ${msg}`;
     }
   },
@@ -147,7 +148,7 @@ export const writeTool: ToolDefinition = {
       const size = fs.statSync(filePath).size;
       return `${action} file: ${filePath} (${size} bytes)`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error writing file: ${msg}`;
     }
   },
@@ -196,7 +197,7 @@ export const editTool: ToolDefinition = {
         : 1;
       return `Edited ${filePath}: replaced ${occurrences} occurrence(s)`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error editing file: ${msg}`;
     }
   },
@@ -249,7 +250,7 @@ export const listDirTool: ToolDefinition = {
 
       return result;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error listing directory: ${msg}`;
     }
   },

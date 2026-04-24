@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
 import type { MCPClientConfig } from "../../config/schema.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 function maskEnvValue(value: string): string {
   if (!value) return value;
@@ -177,7 +178,7 @@ export function registerMCPRoutes(fastify: FastifyInstance, deps: GatewayDeps, a
       try {
         await mcpManager.addClient(key, newClient);
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.warn(`Failed to connect new MCP client '${key}': ${msg}`);
       }
     }
@@ -221,7 +222,7 @@ export function registerMCPRoutes(fastify: FastifyInstance, deps: GatewayDeps, a
       try {
         await mcpManager.replaceClient(key, updated);
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.warn(`Failed to replace MCP client '${key}': ${msg}`);
       }
     } else if (mcpManager && !updated.enabled) {
@@ -253,7 +254,7 @@ export function registerMCPRoutes(fastify: FastifyInstance, deps: GatewayDeps, a
         try {
           await mcpManager.addClient(key, client);
         } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
+          const msg = formatErrorMessage(error);
           logger.warn(`Failed to connect MCP client '${key}': ${msg}`);
         }
       } else {

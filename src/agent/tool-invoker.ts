@@ -1,5 +1,6 @@
 import type { ChatMessage, ToolCall, ToolDefinition } from "../ai/types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface ToolHandler {
   name: string;
@@ -111,7 +112,7 @@ export class ToolInvoker {
         name,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = formatErrorMessage(error);
       logger.error(`Tool execution error (${name}): ${errorMessage}`);
       return {
         role: "tool",

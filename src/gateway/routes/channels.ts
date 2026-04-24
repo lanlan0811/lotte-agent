@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export async function registerChannelRoutes(fastify: FastifyInstance, deps: GatewayDeps): Promise<void> {
   const { app } = deps;
@@ -62,7 +63,7 @@ export async function registerChannelRoutes(fastify: FastifyInstance, deps: Gate
       await channel.start();
       return reply.send({ ok: true, data: { type: request.params.type, status: channel.status } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "START_FAILED", message: msg } });
     }
   });
@@ -88,7 +89,7 @@ export async function registerChannelRoutes(fastify: FastifyInstance, deps: Gate
       await channel.stop();
       return reply.send({ ok: true, data: { type: request.params.type, status: channel.status } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "STOP_FAILED", message: msg } });
     }
   });
@@ -122,7 +123,7 @@ export async function registerChannelRoutes(fastify: FastifyInstance, deps: Gate
         await channelManager.sendCrossChannel(channel_type, to_handle, text, meta);
         return reply.send({ ok: true, data: { sent: true } });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         return reply.code(500).send({ ok: false, error: { code: "SEND_FAILED", message: msg } });
       }
     },

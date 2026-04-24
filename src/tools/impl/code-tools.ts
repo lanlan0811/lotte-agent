@@ -2,6 +2,7 @@ import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import type { ToolDefinition } from "../tool-registry.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export const codeSearchSchema = z.object({
   pattern: z.string().describe("Search pattern (regex supported)"),
@@ -157,7 +158,7 @@ export const codeSearchTool: ToolDefinition = {
 
       return `Found ${allResults.length} match(es) for "${parsed.pattern}":\n\n${lines.join("\n")}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error searching code: ${msg}`;
     }
   },
@@ -407,7 +408,7 @@ export const codeAnalyzeTool: ToolDefinition = {
 
       return `Unknown analysis type: ${parsed.analysisType}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error analyzing code: ${msg}`;
     }
   },

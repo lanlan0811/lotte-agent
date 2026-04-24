@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export async function registerPluginRoutes(fastify: FastifyInstance, deps: GatewayDeps): Promise<void> {
   const { pluginRegistry, pluginLoader } = deps;
@@ -78,7 +79,7 @@ export async function registerPluginRoutes(fastify: FastifyInstance, deps: Gatew
       await pluginRegistry.activate(name, config);
       return reply.send({ ok: true, data: { name, status: "active" } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "ACTIVATION_FAILED", message: msg } });
     }
   });
@@ -99,7 +100,7 @@ export async function registerPluginRoutes(fastify: FastifyInstance, deps: Gatew
       await pluginRegistry.deactivate(name);
       return reply.send({ ok: true, data: { name, status: "disabled" } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "DEACTIVATION_FAILED", message: msg } });
     }
   });
@@ -123,7 +124,7 @@ export async function registerPluginRoutes(fastify: FastifyInstance, deps: Gatew
         })),
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "DISCOVER_FAILED", message: msg } });
     }
   });
@@ -156,7 +157,7 @@ export async function registerPluginRoutes(fastify: FastifyInstance, deps: Gatew
 
       return reply.send({ ok: true, data: { name, status: "active" } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "INSTALL_FAILED", message: msg } });
     }
   });
@@ -179,7 +180,7 @@ export async function registerPluginRoutes(fastify: FastifyInstance, deps: Gatew
       }
       return reply.send({ ok: true, data: { name, status: "removed" } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return reply.code(500).send({ ok: false, error: { code: "REMOVE_FAILED", message: msg } });
     }
   });

@@ -1,4 +1,4 @@
-import type { MCPClientConfig, MCPConfig } from "../config/schema.js";
+﻿import type { MCPClientConfig, MCPConfig } from "../config/schema.js";
 import { StatefulMCPClient } from "./client.js";
 import { EnhancedStatefulClient } from "./stateful-client.js";
 import { RecoveryManager, type RecoveryPhase, type RecoveryConfig } from "./recovery.js";
@@ -58,7 +58,7 @@ export class MCPClientManager {
         if (entry) {
           entry.recoveryState = newState;
         }
-        logger.debug(`MCP client '${key}' recovery state: ${oldState} �?${newState}`);
+        logger.debug(`MCP client '${key}' recovery state: ${oldState} 鈫?${newState}`);
       },
       recovered: (key) => {
         const entry = this.entries.get(key);

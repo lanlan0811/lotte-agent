@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
 import type { EventEmitter } from "../events.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerApprovalRoutes(
   fastify: FastifyInstance,
@@ -33,7 +34,7 @@ export function registerApprovalRoutes(
           },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "APPROVAL_LIST_ERROR", message: msg, details: null },
@@ -70,7 +71,7 @@ export function registerApprovalRoutes(
           data: { id, status: "approved" },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "APPROVAL_APPROVE_ERROR", message: msg, details: null },
@@ -108,7 +109,7 @@ export function registerApprovalRoutes(
           data: { id, status: "rejected", reason: body?.reason },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "APPROVAL_REJECT_ERROR", message: msg, details: null },

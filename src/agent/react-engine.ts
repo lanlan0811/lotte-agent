@@ -5,6 +5,7 @@ import type { ContextCompactor } from "../memory/compactor.js";
 import type { Session } from "./session.js";
 import { ToolInvoker } from "./tool-invoker.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface ReActEngineConfig {
   maxTurns: number;
@@ -186,7 +187,7 @@ export class ReActEngine {
           }
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = formatErrorMessage(error);
         logger.error(`ReAct loop error: ${errorMsg}`);
         this.emitEvent({ type: "error", error: errorMsg });
         finishReason = "error";

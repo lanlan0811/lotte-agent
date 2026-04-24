@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerToolRoutes(
   fastify: FastifyInstance,
@@ -28,7 +29,7 @@ export function registerToolRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "TOOLS_LIST_ERROR", message: msg, details: null },
@@ -71,7 +72,7 @@ export function registerToolRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "TOOL_GET_ERROR", message: msg, details: null },
@@ -115,7 +116,7 @@ export function registerToolRoutes(
           data: { tool: name, result },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "TOOL_INVOKE_ERROR", message: msg, details: null },

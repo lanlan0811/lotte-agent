@@ -227,7 +227,7 @@ export class AutomationManager {
 
       return { status: "ok" };
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = formatErrorMessage(error);
 
       await this.emit("cron.job_failed", {
         jobId: job.id,

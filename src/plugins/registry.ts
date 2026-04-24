@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Plugin, PluginContext, PluginEntry, PluginManifest, PluginToolDefinition, PluginHookDefinition, PluginRouteDefinition } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export class PluginRegistry {
   private entries: Map<string, PluginEntry> = new Map();
@@ -59,7 +60,7 @@ export class PluginRegistry {
       logger.info(`Plugin '${name}' activated`);
     } catch (error) {
       entry.status = "error";
-      entry.error = error instanceof Error ? error.message : String(error);
+      entry.error = formatErrorMessage(error);
       logger.error(`Plugin '${name}' activation failed: ${entry.error}`);
       throw error;
     }
@@ -99,7 +100,7 @@ export class PluginRegistry {
       logger.info(`Plugin '${name}' deactivated`);
     } catch (error) {
       entry.status = "error";
-      entry.error = error instanceof Error ? error.message : String(error);
+      entry.error = formatErrorMessage(error);
       logger.error(`Plugin '${name}' deactivation failed: ${entry.error}`);
     }
   }
@@ -200,7 +201,7 @@ export class PluginLoader {
       return plugin;
     } catch (error) {
       throw new Error(
-        `Failed to load plugin '${manifest.name}': ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to load plugin '${manifest.name}': ${formatErrorMessage(error)}`,
       );
     }
   }

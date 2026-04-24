@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { logger } from "../utils/logger.js";
 import { ensureDir } from "../utils/fs.js";
+import { formatErrorMessage } from "./errors.js";
 
 export interface ErrorDump {
   trace: string;
@@ -29,7 +30,7 @@ export class ErrorDumper {
 
       const trace = error instanceof Error ? error.stack ?? "" : String(error);
       const exceptionType = error instanceof Error ? error.constructor.name : "Unknown";
-      const exceptionMessage = error instanceof Error ? error.message : String(error);
+      const exceptionMessage = formatErrorMessage(error);
 
       const dump: ErrorDump = {
         trace,

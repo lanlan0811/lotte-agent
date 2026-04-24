@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerSessionRoutes(
   fastify: FastifyInstance,
@@ -13,7 +14,7 @@ export function registerSessionRoutes(
 
       reply.send({ ok: true, data: { sessions } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "SESSION_LIST_ERROR", message: msg, details: null },
@@ -56,7 +57,7 @@ export function registerSessionRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "SESSION_CREATE_ERROR", message: msg, details: null },
@@ -88,7 +89,7 @@ export function registerSessionRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "SESSION_GET_ERROR", message: msg, details: null },
@@ -121,7 +122,7 @@ export function registerSessionRoutes(
 
       reply.send({ ok: true, data: { id, status: "deleted" } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "SESSION_DELETE_ERROR", message: msg, details: null },
@@ -159,7 +160,7 @@ export function registerSessionRoutes(
           },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "MESSAGES_GET_ERROR", message: msg, details: null },
@@ -200,7 +201,7 @@ export function registerSessionRoutes(
           },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "COMPACT_ERROR", message: msg, details: null },

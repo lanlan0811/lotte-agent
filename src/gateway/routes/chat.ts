@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
 import type { EventEmitter } from "../events.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerChatRoutes(
   fastify: FastifyInstance,
@@ -80,7 +81,7 @@ export function registerChatRoutes(
         });
         events.emit("agent.done", { sessionId: body.sessionId });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         sendSSE("error", { type: "error", message: msg });
         events.emit("agent.error", { sessionId: body.sessionId, error: msg });
       }
@@ -103,7 +104,7 @@ export function registerChatRoutes(
           },
         });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         reply.status(500).send({
           ok: false,
           error: { code: "CHAT_ERROR", message: msg, details: null },

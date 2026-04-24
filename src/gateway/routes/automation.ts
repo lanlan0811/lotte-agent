@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export async function registerAutomationRoutes(fastify: FastifyInstance, deps: GatewayDeps): Promise<void> {
   const { app } = deps;
@@ -93,7 +94,7 @@ export async function registerAutomationRoutes(fastify: FastifyInstance, deps: G
         });
         return reply.code(201).send({ ok: true, data: job });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         return reply.code(500).send({ ok: false, error: { code: "CREATE_FAILED", message: msg } });
       }
     },
@@ -232,7 +233,7 @@ export async function registerAutomationRoutes(fastify: FastifyInstance, deps: G
         const run = await manager.runWorkflow(request.params.id, request.body?.variables);
         return reply.send({ ok: true, data: run });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         return reply.code(500).send({ ok: false, error: { code: "RUN_FAILED", message: msg } });
       }
     },

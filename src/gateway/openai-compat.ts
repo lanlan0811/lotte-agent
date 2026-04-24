@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "./server.js";
 import type { EventEmitter } from "./events.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 interface ChatCompletionRequest {
   model?: string;
@@ -71,7 +72,7 @@ export function registerOpenAICompatRoutes(
         })),
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         error: { message: msg, type: "internal_error", code: "MODEL_LIST_ERROR" },
       });
@@ -189,7 +190,7 @@ export function registerOpenAICompatRoutes(
             reply.raw.write("data: [DONE]\n\n");
             events.emit("agent.done", { sessionId: session.id });
           } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
+            const msg = formatErrorMessage(error);
             sendSSEChunk({
               id: completionId,
               object: "chat.completion.chunk",
@@ -238,7 +239,7 @@ export function registerOpenAICompatRoutes(
           reply.send(response);
         }
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.error(`OpenAI compat error: ${msg}`);
         reply.status(500).send({
           error: { message: msg, type: "internal_error", code: "CHAT_ERROR" },

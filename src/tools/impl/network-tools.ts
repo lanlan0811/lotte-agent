@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../tool-registry.js";
 import { logger } from "../../utils/logger.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 const DEFAULT_TIMEOUT = 30000;
 const MAX_RESPONSE_SIZE = 1024 * 1024;
@@ -127,7 +128,7 @@ export const httpFetchTool: ToolDefinition = {
       if (error instanceof Error && error.name === "AbortError") {
         return `Error: Request timed out after ${timeout}ms`;
       }
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error fetching ${parsed.url}: ${msg}`;
     }
   },
@@ -202,7 +203,7 @@ export const webSearchTool: ToolDefinition = {
 
       return `Search results for "${parsed.query}":\n\n${lines.join("\n\n")}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error searching for "${parsed.query}": ${msg}`;
     }
   },
