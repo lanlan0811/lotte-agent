@@ -11,15 +11,40 @@ import { logger } from "../../utils/logger.js";
 import type { ChannelsConfig } from "../../config/schema.js";
 import type { Database } from "../../db/database.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
+import {
+  Client,
+  WSClient,
+  EventDispatcher,
+  Domain,
+  type EventHandles,
+} from "@larksuiteoapi/node-sdk";
+import {
+  FEISHU_PROCESSED_IDS_MAX,
+  FEISHU_STALE_MSG_THRESHOLD_MS,
+  FEISHU_NICKNAME_CACHE_MAX,
+  FEISHU_REACTION_TYPING,
+  FEISHU_REACTION_DONE,
+  FEISHU_FILE_MAX_BYTES,
+} from "./constants.js";
+import {
+  shortSessionIdFromFullId,
+  senderDisplayString,
+  extractJsonKey,
+  extractPostText,
+  extractPostImageKeys,
+  extractPostMediaFileKeys,
+  detectFileExt,
+  normalizeFeishuMd,
+  buildInteractiveContentChunks,
+  safeFilename,
+  ensureMediaDir,
+  getDefaultMediaDir,
+} from "./utils.js";
 
 type FeishuConfig = ChannelsConfig["feishu"];
-
-const FEISHU_PROCESSED_IDS_MAX = 2000;
-const FEISHU_STALE_MSG_THRESHOLD_MS = 20_000;
-const WS_INITIAL_RETRY_DELAY = 1000;
-const WS_MAX_RETRY_DELAY = 60000;
-const WS_BACKOFF_FACTOR = 2;
 
 interface ReceiveIdEntry {
   receiveIdType: string;
@@ -32,10 +57,8 @@ export class FeishuChannel extends BaseChannel {
   readonly channelName = "Feishu (Lark)";
 
   private config: FeishuConfig;
-  private tenantAccessToken = "";
-  private tokenExpiresAt = 0;
-  private ws: WebSocket | null = null;
-  private retryDelay = WS_INITIAL_RETRY_DELAY;
+  private client: Client | null = null;
+  private wsClient: WSClient | null = null;
   private renderer: MessageRenderer;
   private processedIds: Set<string> = new Set();
   private receiveIdMap: Map<string, string> = new Map();
@@ -43,6 +66,9 @@ export class FeishuChannel extends BaseChannel {
   private clockOffset = 0;
   private dataDir: string | null = null;
   private db: Database | null = null;
+  private mediaDir: string;
+  private botOpenId: string | null = null;
+  private nicknameCache: Map<string, string> = new Map();
 
   constructor(process: ProcessHandler, config: FeishuConfig, onReplySent: OnReplySent = null) {
     super(process, onReplySent);
@@ -57,6 +83,11 @@ export class FeishuChannel extends BaseChannel {
       supportsCodeFence: true,
       useEmoji: true,
     });
+    if (config.media_dir) {
+      this.mediaDir = ensureMediaDir(config.media_dir);
+    } else {
+      this.mediaDir = ensureMediaDir(getDefaultMediaDir());
+    }
   }
 
   setDataDir(dir: string): void {
@@ -69,83 +100,62 @@ export class FeishuChannel extends BaseChannel {
 
   override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
     const chatId = meta?.feishu_chat_id as string | undefined;
-    if (chatId) return `feishu:chat:${chatId}`;
-    return senderId ? `feishu:${senderId}` : "feishu:unknown";
-  }
-
-  private getApiBase(): string {
-    return this.config.domain === "lark"
-      ? "https://open.larksuite.com/open-apis"
-      : "https://open.feishu.cn/open-apis";
-  }
-
-  private async refreshTenantToken(): Promise<void> {
-    if (Date.now() < this.tokenExpiresAt - 60000) return;
-
-    try {
-      const response = await fetch(`${this.getApiBase()}/auth/v3/tenant_access_token/internal`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          app_id: this.config.app_id,
-          app_secret: this.config.app_secret,
-        }),
-      });
-
-      if (!response.ok) throw new Error(`Token refresh failed: ${response.status}`);
-
-      const data = (await response.json()) as Record<string, unknown>;
-      this.tenantAccessToken = data.tenant_access_token as string;
-      this.tokenExpiresAt = Date.now() + (data.expire as number) * 1000;
-      logger.debug("Feishu tenant access token refreshed");
-    } catch (error) {
-      logger.error(`Feishu token refresh failed: ${error}`);
-      throw error;
+    const chatType = meta?.feishu_chat_type as string | undefined;
+    if (chatType === "group" && chatId) {
+      const appSuffix =
+        this.config.app_id.length >= 4 ? this.config.app_id.slice(-4) : this.config.app_id;
+      return `${appSuffix}_${shortSessionIdFromFullId(chatId)}`;
     }
+    if (senderId) return shortSessionIdFromFullId(senderId);
+    if (chatId) return shortSessionIdFromFullId(chatId);
+    return `feishu:${senderId}`;
   }
 
-  private async fetchBotInfoAndClockOffset(): Promise<void> {
-    try {
-      const base = this.getApiBase();
-      const response = await fetch(`${base}/bot/v3/info`, {
-        headers: {
-          Authorization: `Bearer ${this.tenantAccessToken}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      const dateStr = response.headers.get("date");
-      if (dateStr) {
-        try {
-          const serverMs = new Date(dateStr).getTime();
-          this.clockOffset = serverMs - Date.now();
-          logger.debug(`Feishu clock offset: ${this.clockOffset}ms`);
-        } catch {
-          // ignore date parse error
-        }
-      }
-
-      if (response.ok) {
-        const data = (await response.json()) as Record<string, unknown>;
-        if (data.code !== 0) {
-          logger.debug(`Feishu bot info returned code=${data.code}`);
-        }
-      }
-    } catch (error) {
-      logger.debug(`Feishu fetch bot info failed: ${error}`);
-    }
+  private getSdkDomain(): Domain | string {
+    return this.config.domain === "lark" ? Domain.Lark : Domain.Feishu;
   }
 
   async start(): Promise<void> {
     this._status = "starting";
     try {
-      await this.refreshTenantToken();
-      await this.fetchBotInfoAndClockOffset();
+      if (!this.config.app_id || !this.config.app_secret) {
+        throw new Error("Feishu app_id and app_secret are required");
+      }
+
+      this.client = new Client({
+        appId: this.config.app_id,
+        appSecret: this.config.app_secret,
+        domain: this.getSdkDomain(),
+      });
+
       this.loadReceiveIdStoreFromDisk();
-      await this.connectWebSocket();
+
+      const eventDispatcher = new EventDispatcher({
+        encryptKey: this.config.encrypt_key || undefined,
+        verificationToken: this.config.verification_token || undefined,
+      }).register({
+        "im.message.receive_v1": async (data) => {
+          this.handleSdkMessage(data).catch((err) => {
+            logger.error(`Feishu handle message error: ${err}`);
+          });
+        },
+      } as EventHandles & Record<string, unknown>);
+
+      this.wsClient = new WSClient({
+        appId: this.config.app_id,
+        appSecret: this.config.app_secret,
+        domain: this.getSdkDomain(),
+      });
+
+      await this.wsClient.start({ eventDispatcher });
+
+      this.botOpenId = await this.fetchBotOpenId();
+
       this._status = "running";
       this._connectedAt = Date.now();
-      logger.info("Feishu channel started");
+      logger.info(
+        `Feishu channel started (app_id=${this.config.app_id.slice(0, 12)}, bot_open_id=${this.botOpenId?.slice(0, 12) ?? "?"})`,
+      );
     } catch (error) {
       this._status = "error";
       this._error = error instanceof Error ? error.message : String(error);
@@ -153,118 +163,120 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private async connectWebSocket(): Promise<void> {
-    await this.refreshTenantToken();
-
-    const response = await fetch(`${this.getApiBase()}/callback/ws/endpoint`, {
-      headers: { Authorization: `Bearer ${this.tenantAccessToken}` },
-    });
-
-    if (!response.ok) throw new Error(`Get WS endpoint failed: ${response.status}`);
-
-    const data = (await response.json()) as Record<string, unknown>;
-    const dataInner = data.data as Record<string, unknown> | undefined;
-    const endpoint = dataInner?.endpoint as string | undefined;
-    if (!endpoint) throw new Error("No WebSocket endpoint in response");
-
-    this.ws = new WebSocket(endpoint);
-
-    const connectionPromise = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("WebSocket connection timeout")), 15000);
-
-      this.ws!.onopen = () => {
-        clearTimeout(timeout);
-        logger.debug("Feishu WebSocket connected");
-        this.retryDelay = WS_INITIAL_RETRY_DELAY;
-        resolve();
-      };
-
-      this.ws!.onerror = (event) => {
-        clearTimeout(timeout);
-        logger.error(`Feishu WebSocket error: ${event}`);
-        reject(new Error(`WebSocket error: ${event}`));
-      };
-    });
-
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data as string) as Record<string, unknown>;
-        this.handleWSMessage(data);
-      } catch (error) {
-        logger.error(`Feishu WS message parse error: ${error}`);
-      }
-    };
-
-    this.ws.onclose = () => {
-      logger.warn("Feishu WebSocket closed");
-      if (this._status === "running") {
-        this.scheduleReconnect();
-      }
-    };
-
-    await connectionPromise;
-  }
-
-  private handleWSMessage(data: Record<string, unknown>): void {
-    const schema = data.schema as string;
-    if (schema === "2.0" && data.header) {
-      const header = data.header as Record<string, unknown>;
-      const eventType = header.event_type as string;
-
-      if (this.isStaleMessage(header)) {
-        return;
-      }
-
-      if (eventType === "im.message.receive_v1") {
-        const event = data.event as Record<string, unknown>;
-        const message = event.message as Record<string, unknown>;
-        const sender = event.sender as Record<string, unknown>;
-        this.handleMessageEvent(message, sender, header).catch((err) => {
-          logger.error(`Feishu handle message error: ${err}`);
-        });
-      }
+  async stop(): Promise<void> {
+    if (this.wsClient) {
+      this.wsClient.close({ force: true });
+      this.wsClient = null;
     }
+    this.client = null;
+    this._status = "stopped";
+    logger.info("Feishu channel stopped");
   }
 
-  private isStaleMessage(header: Record<string, unknown>): boolean {
-    const createTime = header.create_time as string | number | undefined;
-    if (!createTime) return false;
+  private async fetchBotOpenId(): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const base =
+        this.config.domain === "lark"
+          ? "https://open.larksuite.com/open-apis"
+          : "https://open.feishu.cn/open-apis";
+      const token = await this.getTenantAccessToken();
+      const response = await fetch(`${base}/bot/v3/info`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const dateStr = response.headers.get("date");
+      if (dateStr) {
+        try {
+          const serverMs = new Date(dateStr).getTime();
+          this.clockOffset = serverMs - Date.now();
+          logger.debug(`Feishu clock offset: ${this.clockOffset}ms`);
+        } catch {
+          // ignore
+        }
+      }
+      if (response.ok) {
+        const data = (await response.json()) as Record<string, unknown>;
+        if (data.code === 0) {
+          const bot = data.bot as Record<string, unknown> | undefined;
+          return (bot?.open_id as string) ?? null;
+        }
+      }
+    } catch (error) {
+      logger.debug(`Feishu fetch bot info failed: ${error}`);
+    }
+    return null;
+  }
 
-    const createMs = typeof createTime === "number" ? createTime : parseInt(createTime, 10);
-    if (isNaN(createMs)) return false;
+  private async getTenantAccessToken(): Promise<string> {
+    if (!this.client) throw new Error("Feishu client not initialized");
+    const config = (this.client as unknown as { tokenManager: { get: () => Promise<string> } })
+      .tokenManager;
+    return config.get();
+  }
 
-    const nowMs = Date.now() + this.clockOffset;
-    const ageMs = nowMs - createMs;
+  private async handleSdkMessage(data: Record<string, unknown>): Promise<void> {
+    const header = data.header as Record<string, unknown> | undefined;
+    const event = data.event as Record<string, unknown> | undefined;
+    if (!header || !event) return;
 
-    if (ageMs > FEISHU_STALE_MSG_THRESHOLD_MS) {
-      logger.debug(`Feishu: drop stale message age=${(ageMs / 1000).toFixed(1)}s (retry)`);
-      return true;
+    const eventAppId = header.app_id as string | undefined;
+    if (eventAppId && eventAppId !== this.config.app_id) {
+      logger.debug(
+        `Feishu: drop misrouted event app_id=${eventAppId} (expected ${this.config.app_id})`,
+      );
+      return;
     }
 
-    return false;
-  }
+    if (this.isStaleMessage(header)) return;
 
-  private async handleMessageEvent(
-    message: Record<string, unknown>,
-    sender: Record<string, unknown>,
-    header: Record<string, unknown>,
-  ): Promise<void> {
+    const message = event.message as Record<string, unknown> | undefined;
+    const sender = event.sender as Record<string, unknown> | undefined;
+    if (!message || !sender) return;
+
     const msgId = message.message_id as string;
     if (this.processedIds.has(msgId)) return;
     this.processedIds.add(msgId);
     if (this.processedIds.size > FEISHU_PROCESSED_IDS_MAX) {
       const iter = this.processedIds.values();
       for (let i = 0; i < FEISHU_PROCESSED_IDS_MAX / 2; i++) {
-        iter.next();
-        this.processedIds.delete(iter.next().value!);
+        const r = iter.next();
+        if (!r.done) this.processedIds.delete(r.value);
       }
     }
 
-    const chatId = message.chat_id as string;
-    const chatType = message.chat_type as string;
-    const msgType = message.message_type as string;
-    const content = message.content as string;
-    const senderId = (sender.sender_id as Record<string, unknown>)?.open_id as string ?? "";
+    const senderType = (sender.sender_type as string) ?? "";
+    if (senderType === "bot") return;
+
+    const senderIdObj = sender.sender_id as Record<string, unknown> | undefined;
+    const senderId = (senderIdObj?.open_id as string) ?? "";
+    if (!senderId) return;
+
+    const chatId = (message.chat_id as string) ?? "";
+    const chatType = (message.chat_type as string) ?? "p2p";
+    const msgType = (message.message_type as string) ?? "text";
+    const contentRaw = (message.content as string) ?? "";
+
+    const mentions = (message.mentions as Array<Record<string, unknown>>) ?? [];
+    let isBotMentioned = false;
+    const botMentionKeys: string[] = [];
+    if (contentRaw.includes("@_all")) isBotMentioned = true;
+    if (this.botOpenId) {
+      for (const m of mentions) {
+        const mId = m.id as Record<string, unknown> | undefined;
+        const mOpenId = (mId?.open_id as string) ?? "";
+        if (mOpenId === this.botOpenId) {
+          isBotMentioned = true;
+          const key = (m.key as string) ?? "";
+          if (key) botMentionKeys.push(key);
+        }
+      }
+    }
+
+    const nickname = await this.getUserNameByOpenId(senderId);
+    const senderDisplay = senderDisplayString(nickname, senderId);
 
     const meta: Record<string, unknown> = {
       feishu_chat_id: chatId,
@@ -273,58 +285,126 @@ export class FeishuChannel extends BaseChannel {
       feishu_sender_id: senderId,
       isGroup: chatType === "group",
     };
+    if (header.create_time) meta.feishu_create_time = header.create_time;
+    if (isBotMentioned) meta.bot_mentioned = true;
 
-    if (header.create_time) {
-      meta.feishu_create_time = header.create_time;
-    }
+    const isGroup = chatType === "group";
+    const receiveId = isGroup ? chatId : senderId;
+    const receiveIdType = isGroup ? "chat_id" : "open_id";
+    meta.feishu_receive_id = receiveId;
+    meta.feishu_receive_id_type = receiveIdType;
 
     this.receiveIdMap.set(senderId, chatId);
 
     const sessionId = this.resolveSessionId(senderId, meta);
-    this.saveReceiveId(sessionId, "chat_id", chatId);
+    this.saveReceiveId(sessionId, receiveIdType, receiveId);
     if (senderId) {
       this.saveReceiveId(`feishu:${senderId}`, "open_id", senderId);
     }
 
     const contentParts: MessageContent[] = [];
+    const textParts: string[] = [];
 
-    try {
-      const parsed = JSON.parse(content) as Record<string, unknown>;
-
-      if (msgType === "text") {
-        const text = (parsed.text as string)?.trim();
-        if (text) contentParts.push({ type: "text", text });
-      } else if (msgType === "image") {
-        const imageKey = parsed.image_key as string;
-        if (imageKey) {
-          contentParts.push({
-            type: "image",
-            url: `${this.getApiBase()}/im/v1/images/${imageKey}`,
-          });
+    if (msgType === "text") {
+      const text = extractJsonKey(contentRaw, "text");
+      if (text) {
+        let cleaned = text;
+        for (const key of botMentionKeys) {
+          cleaned = cleaned.replace(key, "");
         }
-      } else if (msgType === "file") {
-        const fileKey = parsed.file_key as string;
-        const fileName = parsed.file_name as string;
-        contentParts.push({
-          type: "file",
-          filename: fileName,
-          url: `${this.getApiBase()}/im/v1/messages/${msgId}/resources/${fileKey}`,
-        });
-      } else if (msgType === "post") {
-        const postContent = this.extractPostText(parsed);
-        if (postContent) contentParts.push({ type: "text", text: postContent });
-      } else if (msgType === "audio") {
-        contentParts.push({ type: "audio", url: "" });
+        cleaned = cleaned.trim();
+        if (cleaned) textParts.push(cleaned);
       }
-    } catch {
-      if (content?.trim()) {
-        contentParts.push({ type: "text", text: content.trim() });
+    } else if (msgType === "post") {
+      const text = extractPostText(contentRaw);
+      if (text) textParts.push(text);
+      for (const imgKey of extractPostImageKeys(contentRaw)) {
+        const localPath = await this.downloadImageResource(msgId, imgKey);
+        if (localPath) {
+          contentParts.push({ type: "image", url: localPath });
+        } else {
+          textParts.push("[image: download failed]");
+        }
       }
+      for (const fileKey of extractPostMediaFileKeys(contentRaw)) {
+        const localPath = await this.downloadFileResource(msgId, fileKey);
+        if (localPath) {
+          contentParts.push({ type: "file", url: localPath });
+        } else {
+          textParts.push("[media: download failed]");
+        }
+      }
+    } else if (msgType === "image") {
+      const imageKey = extractJsonKey(contentRaw, "image_key", "file_key", "imageKey", "fileKey");
+      if (imageKey) {
+        const localPath = await this.downloadImageResource(msgId, imageKey);
+        if (localPath) {
+          contentParts.push({ type: "image", url: localPath });
+        } else {
+          textParts.push("[image: download failed]");
+        }
+      } else {
+        textParts.push("[image: missing key]");
+      }
+    } else if (msgType === "file") {
+      const fileKey = extractJsonKey(contentRaw, "file_key", "fileKey");
+      const fileName = extractJsonKey(contentRaw, "file_name", "fileName");
+      if (fileKey) {
+        const localPath = await this.downloadFileResource(
+          msgId,
+          fileKey,
+          fileName || "file.bin",
+        );
+        if (localPath) {
+          contentParts.push({ type: "file", url: localPath, filename: fileName });
+        } else {
+          textParts.push("[file: download failed]");
+        }
+      } else {
+        textParts.push("[file: missing key]");
+      }
+    } else if (msgType === "media") {
+      const fileKey = extractJsonKey(contentRaw, "file_key", "fileKey");
+      const fileName = extractJsonKey(contentRaw, "file_name", "fileName");
+      if (fileKey) {
+        const localPath = await this.downloadFileResource(
+          msgId,
+          fileKey,
+          fileName || "video.mp4",
+        );
+        if (localPath) {
+          contentParts.push({ type: "video", url: localPath });
+        } else {
+          textParts.push("[video: download failed]");
+        }
+      } else {
+        textParts.push("[video: missing key]");
+      }
+    } else if (msgType === "audio") {
+      const fileKey = extractJsonKey(contentRaw, "file_key", "fileKey");
+      if (fileKey) {
+        const localPath = await this.downloadFileResource(msgId, fileKey, "audio.opus");
+        if (localPath) {
+          contentParts.push({ type: "audio", url: localPath });
+        } else {
+          textParts.push("[audio: download failed]");
+        }
+      } else {
+        textParts.push("[audio: missing key]");
+      }
+    } else {
+      textParts.push(`[${msgType}]`);
     }
 
+    const text = textParts.join("\n").trim();
+    if (text) {
+      contentParts.unshift({ type: "text", text });
+    }
     if (contentParts.length === 0) return;
 
-    const message2 = this.buildMessage({ senderId, content: contentParts, meta });
+    await this.addReaction(msgId, FEISHU_REACTION_TYPING);
+
+    const message2 = this.buildMessage({ senderId: senderDisplay, content: contentParts, meta });
 
     if (this._enqueue) {
       this._enqueue(message2);
@@ -333,43 +413,123 @@ export class FeishuChannel extends BaseChannel {
     }
   }
 
-  private extractPostText(parsed: Record<string, unknown>): string {
-    const content = parsed.content as Array<Array<Record<string, unknown>>> | undefined;
-    if (!content) return "";
+  private isStaleMessage(header: Record<string, unknown>): boolean {
+    const createTime = header.create_time as string | number | undefined;
+    if (!createTime) return false;
+    const createMs = typeof createTime === "number" ? createTime : parseInt(createTime as string, 10);
+    if (isNaN(createMs)) return false;
+    const nowMs = Date.now() + this.clockOffset;
+    const ageMs = nowMs - createMs;
+    if (ageMs > FEISHU_STALE_MSG_THRESHOLD_MS) {
+      logger.debug(`Feishu: drop stale message age=${(ageMs / 1000).toFixed(1)}s (retry)`);
+      return true;
+    }
+    return false;
+  }
 
-    const texts: string[] = [];
-    for (const line of content) {
-      for (const element of line) {
-        if (element.tag === "text" && element.text) {
-          texts.push(element.text as string);
-        } else if (element.tag === "a" && element.text) {
-          texts.push(element.text as string);
+  private async getUserNameByOpenId(openId: string): Promise<string | undefined> {
+    if (!openId || openId.startsWith("unknown_")) return undefined;
+    const cached = this.nicknameCache.get(openId);
+    if (cached) return cached;
+    if (!this.client) return undefined;
+    try {
+      const resp = await this.client.contact.v3.user.get({
+        params: { user_id_type: "open_id" },
+        path: { user_id: openId },
+      });
+      if (resp.code !== 0) {
+        logger.debug(`Feishu get user name api error: open_id=${openId.slice(0, 20)} code=${resp.code}`);
+        return undefined;
+      }
+      const user = resp.data?.user;
+      if (!user) return undefined;
+      const name = user.name || user.en_name || user.nickname;
+      if (typeof name === "string" && name.trim()) {
+        if (this.nicknameCache.size >= FEISHU_NICKNAME_CACHE_MAX) {
+          const firstKey = this.nicknameCache.keys().next().value;
+          if (firstKey) this.nicknameCache.delete(firstKey);
         }
+        this.nicknameCache.set(openId, name.trim());
+        return name.trim();
       }
+    } catch (error) {
+      logger.debug(`Feishu get user name failed: open_id=${openId.slice(0, 16)} error=${error}`);
     }
-    return texts.join("");
+    return undefined;
   }
 
-  private scheduleReconnect(): void {
-    logger.info(`Feishu reconnecting in ${this.retryDelay / 1000}s`);
-    setTimeout(async () => {
+  private async addReaction(messageId: string, emojiType: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.im.v1.messageReaction.create({
+        data: {
+          reaction_type: { emoji_type: emojiType },
+        },
+        path: { message_id: messageId },
+      });
+    } catch (error) {
+      logger.debug(`Feishu reaction error: ${error}`);
+    }
+  }
+
+  private async downloadImageResource(
+    messageId: string,
+    imageKey: string,
+  ): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const resp = await this.client.im.v1.messageResource.get({
+        params: { type: "image" },
+        path: { message_id: messageId, file_key: imageKey },
+      });
+      if (!resp.writeFile) {
+        logger.debug(`Feishu image download: no writeFile in response`);
+        return null;
+      }
+      const tmpPath = join(this.mediaDir, `tmp_${Date.now()}_${safeFilename(imageKey)}`);
+      await resp.writeFile(tmpPath);
+      const data = await readFile(tmpPath);
+      const ext = detectFileExt(Buffer.from(data), "jpg");
+      const finalPath = join(this.mediaDir, `${messageId}_${safeFilename(imageKey)}.${ext}`);
+      await writeFile(finalPath, data);
       try {
-        await this.connectWebSocket();
-      } catch (error) {
-        logger.error(`Feishu reconnect failed: ${error}`);
-        this.retryDelay = Math.min(this.retryDelay * WS_BACKOFF_FACTOR, WS_MAX_RETRY_DELAY);
-        this.scheduleReconnect();
+        const { unlinkSync } = await import("node:fs");
+        unlinkSync(tmpPath);
+      } catch {
+        // ignore
       }
-    }, this.retryDelay);
+      logger.debug(`Feishu image downloaded: ${finalPath}`);
+      return finalPath;
+    } catch (error) {
+      logger.debug(`Feishu image download failed: ${error}`);
+      return null;
+    }
   }
 
-  async stop(): Promise<void> {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+  private async downloadFileResource(
+    messageId: string,
+    fileKey: string,
+    filenameHint = "file.bin",
+  ): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const resp = await this.client.im.v1.messageResource.get({
+        params: { type: "file" },
+        path: { message_id: messageId, file_key: fileKey },
+      });
+      if (!resp.writeFile) {
+        logger.debug(`Feishu file download: no writeFile in response`);
+        return null;
+      }
+      const filename = filenameHint.replace(/[^\w.\-]/g, "_") || "file.bin";
+      const finalPath = join(this.mediaDir, `${messageId}_${filename}`);
+      await resp.writeFile(finalPath);
+      logger.debug(`Feishu file downloaded: ${finalPath}`);
+      return finalPath;
+    } catch (error) {
+      logger.debug(`Feishu file download failed: ${error}`);
+      return null;
     }
-    this._status = "stopped";
-    logger.info("Feishu channel stopped");
   }
 
   async sendResponse(response: ChannelResponse, meta?: Record<string, unknown>): Promise<void> {
@@ -378,63 +538,217 @@ export class FeishuChannel extends BaseChannel {
   }
 
   async sendText(toHandle: string, text: string, meta?: Record<string, unknown>): Promise<void> {
-    await this.refreshTenantToken();
-
-    const route = this.routeFromHandle(toHandle);
-    let receiveIdType = route.receiveIdType;
-    let receiveId = route.receiveId;
-
-    if (!receiveId && route.sessionKey) {
-      const loaded = this.loadReceiveId(route.sessionKey);
-      if (loaded) {
-        receiveIdType = loaded.receiveIdType;
-        receiveId = loaded.receiveId;
-      }
+    const recv = await this.getReceiveForSend(toHandle, meta);
+    if (!recv) {
+      logger.warn(`Feishu send: no receive_id for toHandle=${toHandle.slice(0, 50)}`);
+      return;
     }
+    const [receiveIdType, receiveId] = recv;
+    await this.sendTextMessage(receiveIdType, receiveId, text);
 
-    if (!receiveId) {
-      const chatId = (meta?.feishu_chat_id as string) ?? this.extractChatId(toHandle);
-      if (chatId) {
-        receiveId = chatId;
-        receiveIdType = "chat_id";
-      }
-    }
-
-    if (!receiveId) throw new Error("No receive_id for Feishu message");
-
-    const body: Record<string, unknown> = {
-      msg_type: "text",
-      content: JSON.stringify({ text }),
-    };
-
-    const response = await fetch(
-      `${this.getApiBase()}/im/v1/messages?receive_id_type=${receiveIdType}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.tenantAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          receive_id: receiveId,
-          ...body,
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Feishu message failed: ${response.status} ${errorText}`);
+    const lastMsgId = meta?._last_sent_message_id as string | undefined;
+    if (lastMsgId) {
+      await this.addReaction(lastMsgId, FEISHU_REACTION_DONE);
     }
   }
 
-  private routeFromHandle(toHandle: string): { receiveIdType?: string; receiveId?: string; sessionKey?: string } {
+  private async sendTextMessage(
+    receiveIdType: string,
+    receiveId: string,
+    body: string,
+  ): Promise<string | null> {
+    if (!this.client) return null;
+    const hasTable = /^\s*\|/m.test(body);
+    if (hasTable) {
+      const chunks = buildInteractiveContentChunks(body);
+      let lastMsgId: string | null = null;
+      for (const chunk of chunks) {
+        const msgId = await this.sendMessage(receiveIdType, receiveId, "interactive", chunk);
+        if (msgId) lastMsgId = msgId;
+      }
+      return lastMsgId;
+    }
+    const post = this.buildPostContent(body, []);
+    const content = JSON.stringify(post);
+    return this.sendMessage(receiveIdType, receiveId, "post", content);
+  }
+
+  private async sendMessage(
+    receiveIdType: string,
+    receiveId: string,
+    msgType: string,
+    content: string,
+  ): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const resp = await this.client.im.v1.message.create({
+        data: {
+          receive_id: receiveId,
+          msg_type: msgType,
+          content,
+        },
+        params: {
+          receive_id_type: receiveIdType as "open_id" | "user_id" | "union_id" | "email" | "chat_id",
+        },
+      });
+      const msgId = resp.data?.message_id ?? null;
+      logger.debug(`Feishu sendMessage: msg_type=${msgType} msg_id=${msgId?.slice(0, 24) ?? "null"}`);
+      return msgId;
+    } catch (error) {
+      logger.error(`Feishu send message failed: ${error}`);
+      return null;
+    }
+  }
+
+  private buildPostContent(
+    text: string,
+    imageKeys: string[],
+  ): Record<string, unknown> {
+    const contentRows: Array<Array<Record<string, unknown>>> = [];
+    if (text) {
+      contentRows.push([{ tag: "md", text: normalizeFeishuMd(text) }]);
+    }
+    for (const imageKey of imageKeys) {
+      contentRows.push([{ tag: "img", image_key: imageKey }]);
+    }
+    if (contentRows.length === 0) {
+      contentRows.push([{ tag: "md", text: "[empty]" }]);
+    }
+    return {
+      zh_cn: {
+        content: contentRows,
+      },
+    };
+  }
+
+  private async uploadImage(data: Buffer, _filename: string): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const resp = await this.client.im.v1.image.create({
+        data: {
+          image_type: "message",
+          image: data,
+        },
+      });
+      const key = resp.image_key ?? null;
+      logger.debug(`Feishu uploadImage: image_key=${key?.slice(0, 24) ?? "null"}`);
+      return key;
+    } catch (error) {
+      logger.error(`Feishu image upload failed: ${error}`);
+      return null;
+    }
+  }
+
+  private async uploadFile(
+    filePath: string,
+    fileType: "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream",
+    fileName: string,
+  ): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const fileBuffer = await readFile(filePath);
+      if (fileBuffer.length > FEISHU_FILE_MAX_BYTES) {
+        logger.warn(`Feishu file too large: ${fileBuffer.length} bytes`);
+        return null;
+      }
+      const resp = await this.client.im.v1.file.create({
+        data: {
+          file_type: fileType,
+          file_name: fileName,
+          file: fileBuffer,
+        },
+      });
+      const key = resp.file_key ?? null;
+      logger.debug(`Feishu uploadFile: file_key=${key?.slice(0, 24) ?? "null"}`);
+      return key;
+    } catch (error) {
+      logger.error(`Feishu file upload failed: ${error}`);
+      return null;
+    }
+  }
+
+  async sendImage(
+    toHandle: string,
+    imageData: Buffer,
+    filename: string,
+    meta?: Record<string, unknown>,
+  ): Promise<string | null> {
+    const recv = await this.getReceiveForSend(toHandle, meta);
+    if (!recv) return null;
+    const [receiveIdType, receiveId] = recv;
+    const imageKey = await this.uploadImage(imageData, filename);
+    if (!imageKey) return null;
+    const content = JSON.stringify({ image_key: imageKey });
+    return this.sendMessage(receiveIdType, receiveId, "image", content);
+  }
+
+  async sendFile(
+    toHandle: string,
+    filePath: string,
+    fileType: "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream",
+    fileName: string,
+    meta?: Record<string, unknown>,
+  ): Promise<string | null> {
+    const recv = await this.getReceiveForSend(toHandle, meta);
+    if (!recv) return null;
+    const [receiveIdType, receiveId] = recv;
+    const fileKey = await this.uploadFile(filePath, fileType, fileName);
+    if (!fileKey) return null;
+    const content = JSON.stringify({ file_key: fileKey });
+    return this.sendMessage(receiveIdType, receiveId, "file", content);
+  }
+
+  private async getReceiveForSend(
+    toHandle: string,
+    meta?: Record<string, unknown>,
+  ): Promise<[string, string] | null> {
+    const m = meta ?? {};
+    const rid = m.feishu_receive_id as string | undefined;
+    const rtype = (m.feishu_receive_id_type as string) ?? "open_id";
+    if (rid) return [rtype, rid];
+
+    const route = this.routeFromHandle(toHandle);
+    const sessionKey = route.sessionKey;
+    if (sessionKey) {
+      const loaded = this.loadReceiveId(sessionKey);
+      if (loaded) return [loaded.receiveIdType, loaded.receiveId];
+      if (sessionKey.startsWith("feishu:open_id:")) {
+        const openId = sessionKey.replace("feishu:open_id:", "");
+        if (openId) return ["open_id", openId];
+      }
+      if (sessionKey.includes("#")) {
+        const suffix = sessionKey.split("#").pop()?.trim();
+        if (suffix && suffix.length >= 4) {
+          for (const [, entry] of this.receiveIdStore) {
+            if (entry.receiveId.endsWith(suffix)) {
+              return [entry.receiveIdType, entry.receiveId];
+            }
+          }
+        }
+      }
+      logger.warn(`Feishu: no store entry for session_key=${sessionKey.slice(0, 40)}`);
+    }
+    if (route.receiveId && route.receiveIdType) {
+      return [route.receiveIdType, route.receiveId];
+    }
+    const loaded = this.loadReceiveId(toHandle);
+    return loaded ? [loaded.receiveIdType, loaded.receiveId] : null;
+  }
+
+  private routeFromHandle(toHandle: string): {
+    receiveIdType?: string;
+    receiveId?: string;
+    sessionKey?: string;
+  } {
     const s = toHandle.trim();
-    if (s.startsWith("feishu:chat:")) {
-      return { receiveIdType: "chat_id", receiveId: s.slice("feishu:chat:".length) };
+    if (s.startsWith("feishu:sw:")) {
+      return { sessionKey: s.replace("feishu:sw:", "") };
+    }
+    if (s.startsWith("feishu:chat_id:")) {
+      return { receiveIdType: "chat_id", receiveId: s.replace("feishu:chat_id:", "") };
     }
     if (s.startsWith("feishu:open_id:")) {
-      return { receiveIdType: "open_id", receiveId: s.slice("feishu:open_id:".length) };
+      return { receiveIdType: "open_id", receiveId: s.replace("feishu:open_id:", "") };
     }
     if (s.startsWith("oc_")) {
       return { receiveIdType: "chat_id", receiveId: s };
@@ -443,11 +757,6 @@ export class FeishuChannel extends BaseChannel {
       return { receiveIdType: "open_id", receiveId: s };
     }
     return { sessionKey: s };
-  }
-
-  private extractChatId(handle: string): string {
-    if (handle.startsWith("feishu:chat:")) return handle.slice("feishu:chat:".length);
-    return this.receiveIdMap.get(handle) ?? handle;
   }
 
   private saveReceiveId(sessionId: string, receiveIdType: string, receiveId: string): void {
@@ -506,7 +815,6 @@ export class FeishuChannel extends BaseChannel {
   private loadReceiveIdStoreFromDisk(): void {
     const storePath = this.getReceiveIdStorePath();
     if (!storePath) return;
-
     try {
       if (!existsSync(storePath)) return;
       const raw = readFileSync(storePath, "utf-8");
@@ -532,7 +840,6 @@ export class FeishuChannel extends BaseChannel {
   private saveReceiveIdStoreToDisk(): void {
     const storePath = this.getReceiveIdStorePath();
     if (!storePath) return;
-
     try {
       mkdirSync(dirname(storePath), { recursive: true });
       const data: Record<string, [string, string]> = {};

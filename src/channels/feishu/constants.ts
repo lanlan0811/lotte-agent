@@ -1,0 +1,24 @@
+export const FEISHU_TOKEN_REFRESH_BEFORE_SECONDS = 60;
+
+export const FEISHU_FILE_MAX_BYTES = 30 * 1024 * 1024;
+
+export const FEISHU_PROCESSED_IDS_MAX = 1000;
+
+export const FEISHU_NICKNAME_CACHE_MAX = 500;
+
+export const FEISHU_SESSION_ID_SUFFIX_LEN = 8;
+
+export const FEISHU_USER_NAME_FETCH_TIMEOUT = 2000;
+
+export const FEISHU_STALE_MSG_THRESHOLD_MS = 20_000;
+
+export const FEISHU_WS_INITIAL_RETRY_DELAY = 1000;
+export const FEISHU_WS_MAX_RETRY_DELAY = 60000;
+export const FEISHU_WS_BACKOFF_FACTOR = 2;
+
+export const MAX_TABLES_PER_CARD = 5;
+
+export const FEISHU_REACTION_TYPING = "Typing";
+export const FEISHU_REACTION_DONE = "DONE";
+
+export const FEISHU_MEDIA_SUBDIR = "feishu";
