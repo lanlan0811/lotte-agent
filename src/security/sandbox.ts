@@ -1,5 +1,5 @@
 import vm from "node:vm";
-import acorn from "acorn";
+import * as acorn from "acorn";
 import type { Node, CallExpression, MemberExpression, Identifier, Literal } from "acorn";
 import { logger } from "../utils/logger.js";
 
