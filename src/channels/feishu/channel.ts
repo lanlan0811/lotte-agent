@@ -13,7 +13,6 @@ import type { Database } from "../../db/database.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
 import {
   Client,
   WSClient,
@@ -630,7 +629,7 @@ export class FeishuChannel extends BaseChannel {
           image: data,
         },
       });
-      const key = resp.image_key ?? null;
+      const key = resp?.image_key ?? null;
       logger.debug(`Feishu uploadImage: image_key=${key?.slice(0, 24) ?? "null"}`);
       return key;
     } catch (error) {
@@ -658,7 +657,7 @@ export class FeishuChannel extends BaseChannel {
           file: fileBuffer,
         },
       });
-      const key = resp.file_key ?? null;
+      const key = resp?.file_key ?? null;
       logger.debug(`Feishu uploadFile: file_key=${key?.slice(0, 24) ?? "null"}`);
       return key;
     } catch (error) {

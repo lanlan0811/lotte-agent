@@ -1,4 +1,4 @@
-import { readdirSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -175,7 +175,8 @@ function parseMdTable(tableLines: string[]): Record<string, unknown> | null {
 
   let sepIdx = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^\s*\|[\s\-:|]+\|\s*$/.test(lines[i])) {
+    const ln = lines[i];
+    if (ln && /^\s*\|[\s\-:|]+\|\s*$/.test(ln)) {
       sepIdx = i;
       break;
     }
@@ -189,7 +190,7 @@ function parseMdTable(tableLines: string[]): Record<string, unknown> | null {
     return stripped.split("|").map((c) => c.trim());
   }
 
-  const headers = splitRow(lines[0]);
+  const headers = splitRow(lines[0]!);
   if (headers.length === 0) return null;
   const colKeys = headers.map((_, i) => `col${i}`);
 
@@ -202,10 +203,10 @@ function parseMdTable(tableLines: string[]): Record<string, unknown> | null {
     });
   }
 
-  const alignments = parseAlignment(lines[sepIdx]);
+  const alignments = parseAlignment(lines[sepIdx]!);
 
   const columns = headers.map((h, i) => ({
-    name: colKeys[i],
+    name: colKeys[i] ?? `col${i}`,
     display_name: h,
     width: "auto",
     horizontal_align: alignments[i] ?? "left",
@@ -213,12 +214,13 @@ function parseMdTable(tableLines: string[]): Record<string, unknown> | null {
 
   const rows: Record<string, string>[] = [];
   for (let r = sepIdx + 1; r < lines.length; r++) {
-    const cells = splitRow(lines[r]);
+    const cells = splitRow(lines[r]!);
     const row: Record<string, string> = {};
     for (let i = 0; i < colKeys.length; i++) {
       let cellText = cells[i] ?? "";
       cellText = cellText.replace(/[*_]{1,2}(.+?)[*_]{1,2}/g, "$1");
-      row[colKeys[i]] = cellText;
+      const key = colKeys[i] ?? `col${i}`;
+      row[key] = cellText;
     }
     rows.push(row);
   }
@@ -242,10 +244,12 @@ function buildElements(text: string): Record<string, unknown>[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (/^\s*\|/.test(line)) {
+    if (line && /^\s*\|/.test(line)) {
       const tableBlock: string[] = [];
-      while (i < lines.length && /^\s*\|/.test(lines[i])) {
-        tableBlock.push(lines[i]);
+      while (i < lines.length) {
+        const ln = lines[i];
+        if (!ln || !/^\s*\|/.test(ln)) break;
+        tableBlock.push(ln);
         i++;
       }
       const tableElem = parseMdTable(tableBlock);
@@ -259,8 +263,10 @@ function buildElements(text: string): Record<string, unknown>[] {
       }
     } else {
       const textBlock: string[] = [];
-      while (i < lines.length && !/^\s*\|/.test(lines[i])) {
-        textBlock.push(lines[i]);
+      while (i < lines.length) {
+        const ln = lines[i];
+        if (!ln || /^\s*\|/.test(ln)) break;
+        textBlock.push(ln);
         i++;
       }
       const content = textBlock.join("\n").trim();
@@ -335,8 +341,6 @@ export function getDefaultMediaDir(): string {
   mkdirSync(base, { recursive: true });
   return base;
 }
-
-const FEISHU_MEDIA_SUBDIR = "feishu";
 
 export function safeFilename(key: string): string {
   return key.replace(/[^a-zA-Z0-9\-_.]/g, "") || "file";

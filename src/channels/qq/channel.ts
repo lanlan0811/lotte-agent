@@ -9,6 +9,23 @@ import type {
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
 import type { ChannelsConfig } from "../../config/schema.js";
+import {
+  QQ_PROCESSED_IDS_MAX,
+  QQ_INVALID_SESSION_OP,
+  QQ_QUICK_DISCONNECT_THRESHOLD,
+  QQ_MAX_QUICK_DISCONNECT_COUNT,
+  QQ_RATE_LIMIT_DELAY,
+  QQ_RECONNECT_DELAYS,
+  QQ_MEDIA_TYPE_IMAGE,
+  QQ_MEDIA_TYPE_FILE,
+} from "./constants.js";
+import {
+  getNextMsgSeq,
+  shouldFallbackFromMarkdown,
+  isUrlContentError,
+  sanitizeQqText,
+  aggressiveSanitizeQqText,
+} from "./utils.js";
 
 type QQConfig = ChannelsConfig["qq"];
 
@@ -26,7 +43,10 @@ const INTENT_PUBLIC_GUILD_MESSAGES = 1 << 30;
 const INTENT_DIRECT_MESSAGE = 1 << 12;
 const INTENT_GROUP_AND_C2C = 1 << 25;
 
-const RECONNECT_DELAYS = [1, 2, 5, 10, 30, 60];
+interface QuickDisconnectState {
+  count: number;
+  lastConnectTime: number;
+}
 
 export class QQChannel extends BaseChannel {
   readonly channelType: ChannelType = "qq";
@@ -42,6 +62,12 @@ export class QQChannel extends BaseChannel {
   private reconnectAttempts = 0;
   private renderer: MessageRenderer;
   private processedIds: Set<string> = new Set();
+  private sessionId: string | null = null;
+  private quickDisconnect: QuickDisconnectState = {
+    count: 0,
+    lastConnectTime: 0,
+  };
+  private shouldRefreshToken = false;
 
   constructor(process: ProcessHandler, config: QQConfig, onReplySent: OnReplySent = null) {
     super(process, onReplySent);
@@ -112,6 +138,11 @@ export class QQChannel extends BaseChannel {
   }
 
   private async connectWebSocket(): Promise<void> {
+    if (this.shouldRefreshToken) {
+      this.tokenExpiresAt = 0;
+      this.shouldRefreshToken = false;
+    }
+
     const wsUrl = await this.getWebSocketUrl();
     this.ws = new WebSocket(wsUrl);
 
@@ -164,10 +195,13 @@ export class QQChannel extends BaseChannel {
       const d = data.d as Record<string, unknown>;
 
       if (t === "READY") {
-          this.reconnectAttempts = 0;
+        this.reconnectAttempts = 0;
+        this.quickDisconnect.lastConnectTime = Date.now() / 1000;
+        this.sessionId = (d?.session_id as string) ?? null;
         logger.info("QQ Bot session ready");
       } else if (t === "RESUMED") {
         this.reconnectAttempts = 0;
+        this.quickDisconnect.lastConnectTime = Date.now() / 1000;
         logger.info("QQ Bot session resumed");
       } else if (t === "C2C_MESSAGE_CREATE" || t === "GROUP_AT_MESSAGE_CREATE" || t === "DIRECT_MESSAGE_CREATE") {
         this.handleMessageEvent(d, t).catch((err) => {
@@ -179,6 +213,15 @@ export class QQChannel extends BaseChannel {
     } else if (op === OP_RECONNECT) {
       logger.info("QQ Bot server requested reconnect");
       this.ws?.close();
+    } else if (op === QQ_INVALID_SESSION_OP) {
+      const canResume = data.d as boolean;
+      logger.error(`QQ Bot invalid session can_resume=${canResume}`);
+      if (!canResume) {
+        this.sessionId = null;
+        this.seq = null;
+        this.shouldRefreshToken = true;
+      }
+      this.ws?.close();
     }
   }
 
@@ -188,7 +231,7 @@ export class QQChannel extends BaseChannel {
     const intents =
       INTENT_PUBLIC_GUILD_MESSAGES | INTENT_DIRECT_MESSAGE | INTENT_GROUP_AND_C2C;
 
-    const identify = {
+    const identify: Record<string, unknown> = {
       op: OP_IDENTIFY,
       d: {
         token: `QQBot ${this.accessToken}`,
@@ -196,6 +239,13 @@ export class QQChannel extends BaseChannel {
         shard: [0, 1],
       },
     };
+
+    if (this.sessionId) {
+      (identify.d as Record<string, unknown>).session_id = this.sessionId;
+    }
+    if (this.seq !== null) {
+      (identify.d as Record<string, unknown>).seq = this.seq;
+    }
 
     this.ws.send(JSON.stringify(identify));
   }
@@ -216,6 +266,31 @@ export class QQChannel extends BaseChannel {
     }
   }
 
+  private computeReconnectDelay(): number {
+    const elapsed = this.quickDisconnect.lastConnectTime
+      ? Date.now() / 1000 - this.quickDisconnect.lastConnectTime
+      : null;
+
+    if (elapsed !== null && elapsed < QQ_QUICK_DISCONNECT_THRESHOLD) {
+      this.quickDisconnect.count++;
+      if (this.quickDisconnect.count >= QQ_MAX_QUICK_DISCONNECT_COUNT) {
+        this.sessionId = null;
+        this.seq = null;
+        this.shouldRefreshToken = true;
+        this.quickDisconnect.count = 0;
+        this.reconnectAttempts = Math.min(
+          this.reconnectAttempts,
+          QQ_RECONNECT_DELAYS.length - 1,
+        );
+        return QQ_RATE_LIMIT_DELAY;
+      }
+    } else {
+      this.quickDisconnect.count = 0;
+    }
+
+    return QQ_RECONNECT_DELAYS[Math.min(this.reconnectAttempts, QQ_RECONNECT_DELAYS.length - 1)]!;
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.config.max_reconnect_attempts) {
       logger.error(`QQ Bot max reconnect attempts (${this.config.max_reconnect_attempts}) reached`);
@@ -224,7 +299,7 @@ export class QQChannel extends BaseChannel {
       return;
     }
 
-    const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempts, RECONNECT_DELAYS.length - 1)]!;
+    const delay = this.computeReconnectDelay();
     this.reconnectAttempts++;
     logger.info(`QQ Bot reconnecting in ${delay}s (attempt ${this.reconnectAttempts})`);
 
@@ -243,11 +318,12 @@ export class QQChannel extends BaseChannel {
     const msgId = data.id as string;
     if (this.processedIds.has(msgId)) return;
     this.processedIds.add(msgId);
-    if (this.processedIds.size > 2000) {
+    if (this.processedIds.size > QQ_PROCESSED_IDS_MAX) {
       const iter = this.processedIds.values();
-      for (let i = 0; i < 1000; i++) {
+      for (let i = 0; i < QQ_PROCESSED_IDS_MAX / 2; i++) {
         iter.next();
-        this.processedIds.delete(iter.next().value!);
+        const val = iter.next().value;
+        if (val) this.processedIds.delete(val);
       }
     }
 
@@ -260,11 +336,13 @@ export class QQChannel extends BaseChannel {
     };
 
     const isGroup = eventType === "GROUP_AT_MESSAGE_CREATE";
+    const messageType = isGroup ? "group" : "c2c";
     if (isGroup) {
       const groupId = (data.group_openid as string) ?? "";
       meta.qq_group_id = groupId;
       meta.isGroup = true;
     }
+    meta.qq_message_type = messageType;
 
     const contentParts: MessageContent[] = [];
     if (content.trim()) {
@@ -276,12 +354,13 @@ export class QQChannel extends BaseChannel {
       for (const att of attachments) {
         const contentType = att.content_type as string;
         const url = att.url as string;
+        const fullUrl = url.startsWith("http") ? url : `https://multimedia.nt.qq.com${url}`;
         if (contentType?.startsWith("image")) {
-          contentParts.push({ type: "image", url: url.startsWith("http") ? url : `https://multimedia.nt.qq.com${url}` });
+          contentParts.push({ type: "image", url: fullUrl });
         } else if (contentType?.startsWith("video")) {
-          contentParts.push({ type: "video", url: url.startsWith("http") ? url : `https://multimedia.nt.qq.com${url}` });
+          contentParts.push({ type: "video", url: fullUrl });
         } else if (contentType?.startsWith("audio")) {
-          contentParts.push({ type: "audio", url: url.startsWith("http") ? url : `https://multimedia.nt.qq.com${url}` });
+          contentParts.push({ type: "audio", url: fullUrl });
         }
       }
     }
@@ -317,25 +396,98 @@ export class QQChannel extends BaseChannel {
 
     const isGroup = Boolean(meta?.isGroup);
     const msgId = meta?.qq_msg_id as string | undefined;
+    const messageType = (meta?.qq_message_type as string) ?? (isGroup ? "group" : "c2c");
+    const useMarkdown = this.config.markdown_enabled;
 
     if (isGroup) {
       const groupId = meta?.qq_group_id as string;
       if (!groupId) throw new Error("Missing group_openid for group message");
-      await this.sendGroupMessage(groupId, text, msgId);
+      await this.sendTextWithFallback(messageType, groupId, text, msgId, useMarkdown);
     } else {
       const userId = this.extractUserId(toHandle);
-      await this.sendC2CMessage(userId, text, msgId);
+      await this.sendTextWithFallback(messageType, userId, text, msgId, useMarkdown);
     }
   }
 
-  private async sendC2CMessage(openId: string, text: string, msgId?: string): Promise<void> {
-    const body: Record<string, unknown> = {
-      content: text,
-      msg_type: 0,
-      msg_id: msgId ?? "",
-    };
+  private async sendTextWithFallback(
+    messageType: string,
+    openId: string,
+    text: string,
+    msgId: string | undefined,
+    useMarkdown: boolean,
+  ): Promise<boolean> {
+    try {
+      await this.dispatchText(messageType, openId, text, msgId, useMarkdown);
+      return true;
+    } catch (error) {
+      if (!useMarkdown) {
+        return this.tryAggressiveUrlFallback(error, messageType, openId, text, msgId);
+      }
+      if (!shouldFallbackFromMarkdown(error)) {
+        logger.error(`QQ send text failed with markdown; skip fallback: ${error}`);
+        return false;
+      }
+      logger.warn("QQ send text failed with markdown validation; fallback to plain text");
+    }
 
-    const response = await fetch(`${DEFAULT_API_BASE}/v2/users/${openId}/messages`, {
+    const { text: fallbackText } = sanitizeQqText(text);
+    try {
+      await this.dispatchText(messageType, openId, fallbackText, msgId, false);
+      return true;
+    } catch (error2) {
+      return this.tryAggressiveUrlFallback(error2, messageType, openId, text, msgId);
+    }
+  }
+
+  private async tryAggressiveUrlFallback(
+    error: unknown,
+    messageType: string,
+    openId: string,
+    originalText: string,
+    msgId: string | undefined,
+  ): Promise<boolean> {
+    if (!isUrlContentError(error)) {
+      logger.error(`QQ send text failed: ${error}`);
+      return false;
+    }
+    logger.warn("QQ send text failed due to URL content; trying aggressive URL stripping");
+    const { text: aggressiveText } = aggressiveSanitizeQqText(originalText);
+    try {
+      await this.dispatchText(messageType, openId, aggressiveText, msgId, false);
+      return true;
+    } catch (error3) {
+      logger.error(`QQ send text aggressive fallback failed: ${error3}`);
+      return false;
+    }
+  }
+
+  private async dispatchText(
+    messageType: string,
+    openId: string,
+    content: string,
+    msgId: string | undefined,
+    useMarkdown: boolean,
+  ): Promise<void> {
+    const useMsgSeq = messageType === "c2c" || messageType === "group";
+    const body: Record<string, unknown> = {};
+
+    if (useMarkdown) {
+      body.markdown = { content };
+      if (useMsgSeq) body.msg_type = 2;
+    } else {
+      body.content = content;
+      if (useMsgSeq) body.msg_type = 0;
+    }
+
+    if (useMsgSeq) {
+      body.msg_seq = getNextMsgSeq(msgId ?? messageType);
+    }
+    if (msgId) {
+      body.msg_id = msgId;
+    }
+
+    const path = this.resolveSendPath(messageType, openId);
+    const response = await fetch(`${DEFAULT_API_BASE}${path}`, {
       method: "POST",
       headers: {
         Authorization: `QQBot ${this.accessToken}`,
@@ -346,18 +498,123 @@ export class QQChannel extends BaseChannel {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`QQ C2C message failed: ${response.status} ${errorText}`);
+      throw new Error(`QQ API error: ${response.status} ${errorText}`);
     }
   }
 
-  private async sendGroupMessage(groupOpenId: string, text: string, msgId?: string): Promise<void> {
-    const body: Record<string, unknown> = {
-      content: text,
-      msg_type: 0,
-      msg_id: msgId ?? "",
-    };
+  private resolveSendPath(messageType: string, openId: string): string {
+    if (messageType === "c2c") {
+      return `/v2/users/${openId}/messages`;
+    }
+    if (messageType === "group") {
+      return `/v2/groups/${openId}/messages`;
+    }
+    return `/channels/${openId}/messages`;
+  }
 
-    const response = await fetch(`${DEFAULT_API_BASE}/v2/groups/${groupOpenId}/messages`, {
+  async sendImage(
+    toHandle: string,
+    imageUrl: string,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.refreshAccessToken();
+
+    const isGroup = Boolean(meta?.isGroup);
+    const messageType = (meta?.qq_message_type as string) ?? (isGroup ? "group" : "c2c");
+    const msgId = meta?.qq_msg_id as string | undefined;
+    const openId = isGroup
+      ? (meta?.qq_group_id as string)
+      : this.extractUserId(toHandle);
+
+    if (!openId) throw new Error("Missing openId for image send");
+
+    const fileInfo = await this.uploadMedia(openId, QQ_MEDIA_TYPE_IMAGE, imageUrl, messageType);
+    if (!fileInfo) {
+      logger.warn(`QQ upload image failed, skipping: ${imageUrl}`);
+      return;
+    }
+
+    await this.sendMediaMessage(openId, fileInfo, msgId, messageType);
+  }
+
+  async sendFile(
+    toHandle: string,
+    fileUrl: string,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.refreshAccessToken();
+
+    const isGroup = Boolean(meta?.isGroup);
+    const messageType = (meta?.qq_message_type as string) ?? (isGroup ? "group" : "c2c");
+    const msgId = meta?.qq_msg_id as string | undefined;
+    const openId = isGroup
+      ? (meta?.qq_group_id as string)
+      : this.extractUserId(toHandle);
+
+    if (!openId) throw new Error("Missing openId for file send");
+
+    const fileInfo = await this.uploadMedia(openId, QQ_MEDIA_TYPE_FILE, fileUrl, messageType);
+    if (!fileInfo) {
+      logger.warn(`QQ upload file failed, skipping: ${fileUrl}`);
+      return;
+    }
+
+    await this.sendMediaMessage(openId, fileInfo, msgId, messageType);
+  }
+
+  private async uploadMedia(
+    openId: string,
+    mediaType: number,
+    url: string,
+    messageType: string,
+  ): Promise<string | null> {
+    const path = this.resolveMediaPath(messageType, openId);
+    if (!path) return null;
+
+    try {
+      const response = await fetch(`${DEFAULT_API_BASE}${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: `QQBot ${this.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_type: mediaType,
+          url,
+          srv_send_msg: false,
+        }),
+      });
+
+      if (!response.ok) {
+        logger.warn(`QQ upload media failed: ${response.status}`);
+        return null;
+      }
+
+      const data = (await response.json()) as Record<string, unknown>;
+      return (data.file_info as string) ?? null;
+    } catch (error) {
+      logger.error(`QQ upload media error: ${error}`);
+      return null;
+    }
+  }
+
+  private async sendMediaMessage(
+    openId: string,
+    fileInfo: string,
+    msgId: string | undefined,
+    messageType: string,
+  ): Promise<void> {
+    const path = this.resolveSendPath(messageType, openId);
+    const body: Record<string, unknown> = {
+      msg_type: 7,
+      media: { file_info: fileInfo },
+      msg_seq: getNextMsgSeq(msgId ?? `${messageType}_media`),
+    };
+    if (msgId) {
+      body.msg_id = msgId;
+    }
+
+    const response = await fetch(`${DEFAULT_API_BASE}${path}`, {
       method: "POST",
       headers: {
         Authorization: `QQBot ${this.accessToken}`,
@@ -368,8 +625,18 @@ export class QQChannel extends BaseChannel {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`QQ group message failed: ${response.status} ${errorText}`);
+      throw new Error(`QQ media message failed: ${response.status} ${errorText}`);
     }
+  }
+
+  private resolveMediaPath(messageType: string, openId: string): string | null {
+    if (messageType === "c2c") {
+      return `/v2/users/${openId}/files`;
+    }
+    if (messageType === "group") {
+      return `/v2/groups/${openId}/files`;
+    }
+    return null;
   }
 
   private extractUserId(handle: string): string {

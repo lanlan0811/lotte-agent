@@ -1,4 +1,13 @@
 import crypto from "node:crypto";
+import {
+  makeIlinkHeaders,
+  aesEcbDecrypt,
+  aesEcbEncrypt,
+  generateAesKeyHex,
+  encodeAesKeyForMsg,
+  buildCdnDownloadUrl,
+  buildCdnUploadUrl,
+} from "./utils.js";
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const CHANNEL_VERSION = "2.0.1";
@@ -8,6 +17,13 @@ const DEFAULT_TIMEOUT = 15000;
 export interface ILinkClientOptions {
   botToken?: string;
   baseUrl?: string;
+}
+
+export interface CdnUploadResult {
+  encryptQueryParam: string;
+  aesKeyB64: string;
+  aesKeyHex: string;
+  fileSize: number;
 }
 
 export class ILinkClient {
@@ -21,14 +37,7 @@ export class ILinkClient {
   }
 
   private makeHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "User-Agent": "Lotte-WeixinBot/1.0",
-    };
-    if (this.botToken) {
-      headers["Authorization"] = `Bearer ${this.botToken}`;
-    }
-    return headers;
+    return makeIlinkHeaders(this.botToken);
   }
 
   private async request(
@@ -159,31 +168,139 @@ export class ILinkClient {
     });
   }
 
-  async downloadMedia(url: string, aesKeyB64?: string): Promise<Buffer> {
-    const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
-    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-    let data = Buffer.from(await response.arrayBuffer());
+  async downloadCdnMedia(
+    url: string,
+    aesKeyB64: string = "",
+    encryptQueryParam: string = "",
+  ): Promise<Buffer> {
+    let downloadUrl: string;
+    if (encryptQueryParam) {
+      downloadUrl = buildCdnDownloadUrl(encryptQueryParam);
+    } else if (url) {
+      downloadUrl = url;
+    } else {
+      throw new Error("downloadCdnMedia: no URL or encrypt_query_param provided");
+    }
+
+    const response = await fetch(downloadUrl, {
+      headers: { "User-Agent": "Lotte-WeixinBot/1.0" },
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) {
+      throw new Error(`CDN download failed: ${response.status}`);
+    }
+
+    let data = Buffer.from(await response.arrayBuffer()) as Buffer;
     if (aesKeyB64) {
-      data = Buffer.from(aesEcbDecrypt(data, aesKeyB64));
+      data = aesEcbDecrypt(data, aesKeyB64) as Buffer;
     }
     return data;
+  }
+
+  async uploadCdnMedia(
+    rawFileData: Buffer,
+    aesKeyHex: string,
+    _fileSize: number,
+    uploadQueryParam: string,
+  ): Promise<CdnUploadResult> {
+    const aesKeyRawBytes = Buffer.from(aesKeyHex, "hex");
+    const aesKeyB64ForEncrypt = aesKeyRawBytes.toString("base64");
+    const encryptedData = aesEcbEncrypt(rawFileData, aesKeyB64ForEncrypt);
+
+    const uploadUrl = buildCdnUploadUrl(uploadQueryParam);
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "User-Agent": "Lotte-WeixinBot/1.0",
+      },
+      body: encryptedData,
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`CDN upload failed: ${response.status}`);
+    }
+
+    const encryptQueryParam =
+      (response.headers.get("x-encrypted-param") as string) ?? "";
+
+    return {
+      encryptQueryParam,
+      aesKeyB64: encodeAesKeyForMsg(aesKeyHex),
+      aesKeyHex,
+      fileSize: encryptedData.length,
+    };
+  }
+
+  async prepareCdnUpload(): Promise<{
+    aesKeyHex: string;
+    aesKeyB64ForEncrypt: string;
+    aesKeyB64ForMsg: string;
+  }> {
+    const aesKeyHex = generateAesKeyHex();
+    const aesKeyRawBytes = Buffer.from(aesKeyHex, "hex");
+    const aesKeyB64ForEncrypt = aesKeyRawBytes.toString("base64");
+    const aesKeyB64ForMsg = encodeAesKeyForMsg(aesKeyHex);
+    return { aesKeyHex, aesKeyB64ForEncrypt, aesKeyB64ForMsg };
+  }
+
+  async sendImageMessage(
+    toUserId: string,
+    contextToken: string,
+    uploadResult: CdnUploadResult,
+  ): Promise<Record<string, unknown>> {
+    return this.sendmessage({
+      from_user_id: "",
+      to_user_id: toUserId,
+      client_id: crypto.randomUUID(),
+      message_type: 2,
+      message_state: 2,
+      context_token: contextToken,
+      item_list: [
+        {
+          type: 2,
+          image_item: {
+            encrypt_query_param: uploadResult.encryptQueryParam,
+            aes_key: uploadResult.aesKeyB64,
+            encrypt_type: 1,
+          },
+        },
+      ],
+    });
+  }
+
+  async sendFileMessage(
+    toUserId: string,
+    contextToken: string,
+    uploadResult: CdnUploadResult,
+    fileName: string,
+  ): Promise<Record<string, unknown>> {
+    return this.sendmessage({
+      from_user_id: "",
+      to_user_id: toUserId,
+      client_id: crypto.randomUUID(),
+      message_type: 2,
+      message_state: 2,
+      context_token: contextToken,
+      item_list: [
+        {
+          type: 4,
+          file_item: {
+            file_name: fileName,
+            encrypt_query_param: uploadResult.encryptQueryParam,
+            aes_key: uploadResult.aesKeyB64,
+            encrypt_type: 1,
+            file_size: uploadResult.fileSize,
+          },
+        },
+      ],
+    });
   }
 
   abort(): void {
     this._abortController?.abort();
   }
-}
-
-export function aesEcbDecrypt(data: Buffer, keyB64: string): Buffer {
-  const key = Buffer.from(keyB64, "base64");
-  const decipher = crypto.createDecipheriv("aes-128-ecb", key, null);
-  return Buffer.concat([decipher.update(data), decipher.final()]);
-}
-
-export function aesEcbEncrypt(data: Buffer, keyB64: string): Buffer {
-  const key = Buffer.from(keyB64, "base64");
-  const cipher = crypto.createCipheriv("aes-128-ecb", key, null);
-  return Buffer.concat([cipher.update(data), cipher.final()]);
 }
 
 export { DEFAULT_BASE_URL, CHANNEL_VERSION };
