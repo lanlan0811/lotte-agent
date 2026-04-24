@@ -543,11 +543,10 @@ export class FeishuChannel extends BaseChannel {
       return;
     }
     const [receiveIdType, receiveId] = recv;
-    await this.sendTextMessage(receiveIdType, receiveId, text);
+    const sentMsgId = await this.sendTextMessage(receiveIdType, receiveId, text);
 
-    const lastMsgId = meta?._last_sent_message_id as string | undefined;
-    if (lastMsgId) {
-      await this.addReaction(lastMsgId, FEISHU_REACTION_DONE);
+    if (sentMsgId) {
+      await this.addReaction(sentMsgId, FEISHU_REACTION_DONE);
     }
   }
 

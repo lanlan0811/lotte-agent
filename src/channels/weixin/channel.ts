@@ -206,7 +206,9 @@ export class WeixinChannel extends BaseChannel {
         } else if (itemType === 2) {
           await this.handleImageItem(item, contentParts, textParts);
         } else if (itemType === 3) {
-          this.handleVoiceItem(item, textParts);
+          if (this.config.voice_asr) {
+            this.handleVoiceItem(item, textParts);
+          }
         } else if (itemType === 4) {
           await this.handleFileItem(item, contentParts, textParts);
         } else if (itemType === 5) {
