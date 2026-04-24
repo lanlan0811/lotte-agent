@@ -78,7 +78,8 @@ export class DocumentLoader {
           hash: this.computeHash(content),
         },
       };
-    } catch {
+    } catch (e) {
+      logger.debug(`RAG loader: Failed to parse document ${filePath}: ${e}`);
       return {
         text: content,
         metadata: {

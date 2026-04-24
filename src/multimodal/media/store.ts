@@ -110,8 +110,8 @@ export class MediaStore {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      logger.debug(`Media store: Failed to delete file ${filePath}: ${e}`);
     }
 
     this.files.delete(id);
@@ -141,7 +141,8 @@ export class MediaStore {
         return null;
       }
       return realPath;
-    } catch {
+    } catch (e) {
+      logger.debug(`Media store: Failed to resolve path ${filePath}: ${e}`);
       return null;
     }
   }
@@ -165,8 +166,8 @@ export class MediaStore {
           });
         }
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      logger.debug(`Media store: Failed to rebuild index: ${e}`);
     }
   }
 

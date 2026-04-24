@@ -29,9 +29,9 @@ export class VectorStore {
         this.vecAvailable = true;
         logger.info(`sqlite-vec available: v${row.version}`);
       }
-    } catch {
+    } catch (e) {
       this.vecAvailable = false;
-      logger.warn("sqlite-vec not available, falling back to brute-force cosine similarity");
+      logger.warn(`sqlite-vec not available, falling back to brute-force cosine similarity: ${e}`);
     }
   }
 
@@ -145,8 +145,8 @@ export class VectorStore {
         for (const { chunk_id } of chunkIds) {
           try {
             deleteVecChunks.run(chunk_id);
-          } catch {
-            // skip vec table errors
+          } catch (e) {
+            logger.debug(`RAG: Failed to delete vec chunk ${chunk_id}: ${e}`);
           }
         }
       }
@@ -288,8 +288,8 @@ export class VectorStore {
 
     try {
       this.db.exec("DELETE FROM rag_chunks_vec");
-    } catch {
-      // table may not exist yet
+    } catch (e) {
+      logger.debug(`RAG: Failed to clear vec table: ${e}`);
     }
 
     this.ensureVecTable(dimension);
@@ -310,8 +310,8 @@ export class VectorStore {
             const buf = numberArrayToFloat32Buffer(embedding);
             insertStmt.run(row.chunk_id, buf);
           }
-        } catch {
-          // skip malformed embeddings
+        } catch (e) {
+          logger.debug(`RAG: Failed to insert vec chunk: ${e}`);
         }
       }
     });
@@ -358,7 +358,8 @@ export class VectorStore {
     try {
       const embeddingStr = row.embedding as string;
       embedding = JSON.parse(embeddingStr);
-    } catch {
+    } catch (e) {
+      logger.debug(`RAG: Failed to parse embedding JSON: ${e}`);
       embedding = [];
     }
 
@@ -367,7 +368,8 @@ export class VectorStore {
       if (row.metadata_json) {
         metadata = JSON.parse(row.metadata_json as string);
       }
-    } catch {
+    } catch (e) {
+      logger.debug(`RAG: Failed to parse metadata: ${e}`);
       metadata = null;
     }
 

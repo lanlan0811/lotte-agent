@@ -117,8 +117,8 @@ export class RAGManager {
     if (doc.file_path && fs.existsSync(doc.file_path)) {
       try {
         fs.unlinkSync(doc.file_path);
-      } catch {
-        logger.warn(`Failed to delete file: ${doc.file_path}`);
+      } catch (e) {
+        logger.warn(`Failed to delete file: ${doc.file_path}: ${e}`);
       }
     }
 

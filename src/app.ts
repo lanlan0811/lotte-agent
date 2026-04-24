@@ -261,7 +261,8 @@ export class LotteApp {
         try {
           try {
             await this.channelManager?.sendToSession(toHandle, text);
-          } catch {
+          } catch (e) {
+            logger.debug(`Direct send failed, trying cross-channel: ${e}`);
             await this.channelManager?.sendCrossChannel(channelId, toHandle, text);
           }
         } catch (error) {

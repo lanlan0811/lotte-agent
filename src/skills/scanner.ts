@@ -191,8 +191,8 @@ export class SkillScanner {
             });
           }
         }
-      } catch {
-        // Skip files that can't be read
+      } catch (e) {
+        logger.debug(`Scanner: Failed to read file: ${e}`);
       }
     }
   }
@@ -217,8 +217,8 @@ export class SkillScanner {
             });
           }
         }
-      } catch {
-        // Skip files that can't be read
+      } catch (e) {
+        logger.debug(`Scanner: Failed to read file for signature scan: ${e}`);
       }
     }
   }
@@ -247,7 +247,8 @@ export class SkillScanner {
       let entries;
       try {
         entries = readdirSync(currentDir, { withFileTypes: true });
-      } catch {
+      } catch (e) {
+        logger.debug(`Scanner: Failed to read directory ${currentDir}: ${e}`);
         return;
       }
 
@@ -268,7 +269,8 @@ export class SkillScanner {
           try {
             const stat = statSync(fullPath);
             if (stat.size > this.maxFileSize) continue;
-          } catch {
+          } catch (e) {
+            logger.debug(`Scanner: Failed to stat file ${fullPath}: ${e}`);
             continue;
           }
 

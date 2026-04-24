@@ -20,7 +20,8 @@ export function normalizeAesKey(keyB64: string): Buffer {
   let decoded: Buffer;
   try {
     decoded = Buffer.from(raw, "base64");
-  } catch {
+  } catch (e) {
+    console.debug(`WeChat utils: base64 decode failed, falling back to utf-8: ${e}`);
     decoded = Buffer.from(raw, "utf-8");
   }
 

@@ -185,8 +185,8 @@ export class GeminiProvider extends BaseProvider {
               totalPromptTokens = chunk.usageMetadata.promptTokenCount;
               totalCompletionTokens = chunk.usageMetadata.candidatesTokenCount;
             }
-          } catch {
-            // skip malformed chunks
+          } catch (e) {
+            logger.debug(`Skipping malformed stream chunk: ${e}`);
           }
         }
       }
@@ -329,7 +329,8 @@ export class GeminiProvider extends BaseProvider {
                 },
               }],
             });
-          } catch {
+          } catch (e) {
+            logger.debug(`Failed to parse function response, falling back to text: ${e}`);
             contents.push({
               role: "user",
               parts: [{

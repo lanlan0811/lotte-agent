@@ -66,8 +66,8 @@ export class SpeechToText {
     } finally {
       try {
         fs.unlinkSync(tmpPath);
-      } catch {
-        // ignore
+      } catch (e) {
+        logger.debug(`STT: Failed to delete temp file ${tmpPath}: ${e}`);
       }
     }
   }

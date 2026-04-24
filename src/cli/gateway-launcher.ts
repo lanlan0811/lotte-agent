@@ -163,8 +163,8 @@ function resolveWebDir(): string {
       if (fs.existsSync(path.join(candidate, "package.json"))) {
         return candidate;
       }
-    } catch {
-      // continue
+    } catch (e) {
+      logger.debug(`Path check failed for ${candidate}: ${e}`);
     }
   }
 
@@ -184,8 +184,8 @@ function resolveProdWebRoot(): string {
       if (fs.existsSync(candidate)) {
         return candidate;
       }
-    } catch {
-      // continue
+    } catch (e) {
+      logger.debug(`Path check failed for ${candidate}: ${e}`);
     }
   }
 

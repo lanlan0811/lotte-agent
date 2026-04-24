@@ -192,8 +192,8 @@ export class FeishuChannel extends BaseChannel {
           const serverMs = new Date(dateStr).getTime();
           this.clockOffset = serverMs - Date.now();
           logger.debug(`Feishu clock offset: ${this.clockOffset}ms`);
-        } catch {
-          // ignore
+        } catch (e) {
+          logger.debug(`Feishu: Failed to calculate clock offset: ${e}`);
         }
       }
       if (response.ok) {
@@ -494,8 +494,8 @@ export class FeishuChannel extends BaseChannel {
       try {
         const { unlinkSync } = await import("node:fs");
         unlinkSync(tmpPath);
-      } catch {
-        // ignore
+      } catch (e) {
+        logger.debug(`Feishu: Failed to delete temp file: ${e}`);
       }
       logger.debug(`Feishu image downloaded: ${finalPath}`);
       return finalPath;

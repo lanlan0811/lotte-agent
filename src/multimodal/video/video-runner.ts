@@ -144,8 +144,8 @@ export class VideoRunner {
     } finally {
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        // ignore cleanup errors
+      } catch (e) {
+        logger.debug(`Video runner: Failed to cleanup temp dir: ${e}`);
       }
     }
   }

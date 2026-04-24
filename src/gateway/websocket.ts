@@ -182,7 +182,8 @@ export class WebSocketManager {
       try {
         const message = JSON.parse(raw) as GatewayFrame;
         this.handleMessage(clientId, message);
-      } catch {
+      } catch (e) {
+        logger.debug(`Failed to parse WebSocket message from client ${clientId}: ${e}`);
         this.sendError(clientId, "", "PARSE_ERROR", "Invalid JSON message");
       }
     });
@@ -656,8 +657,8 @@ export class WebSocketManager {
       try {
         client.ws.send(JSON.stringify(frame));
         client.ws.close(1000, "Server shutting down");
-      } catch {
-        // ignore
+      } catch (e) {
+        logger.debug(`Failed to close WebSocket client: ${e}`);
       }
     }
 
