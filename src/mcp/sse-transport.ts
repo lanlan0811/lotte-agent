@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { MCPClientConfig } from "../config/schema.js";
 import { MCPTransport } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 const JSONRPC_VERSION = "2.0";
 
@@ -356,7 +357,7 @@ export class SSETransportEnhanced extends MCPTransport {
         logger.info(`[MCP sse:${this.config.name}] Reconnected successfully`);
         this.eventHandlers.connected?.();
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.debug(`[MCP sse:${this.config.name}] Reconnect failed: ${msg}`);
         this.scheduleReconnect();
       }

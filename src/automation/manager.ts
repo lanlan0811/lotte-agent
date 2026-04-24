@@ -15,6 +15,7 @@ import { EventBus } from "./event-bus.js";
 import { WorkflowEngine, type WorkflowExecutor } from "./workflow-engine.js";
 import { TriggerManager, type TriggerAction } from "./trigger-manager.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export type AutomationDeps = {
   chat: (sessionId: string, text: string) => Promise<{ response?: string } | null>;

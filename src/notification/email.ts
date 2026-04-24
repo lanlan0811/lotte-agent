@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { NotificationEvent, NotificationResult } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface EmailConfig {
   enabled: boolean;
@@ -58,7 +59,7 @@ export class EmailNotifier {
       logger.debug(`Email notification sent: ${result.messageId}`);
       return { channel: "email", success: true };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       logger.error(`Email notification failed: ${msg}`);
       return { channel: "email", success: false, error: msg };
     }

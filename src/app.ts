@@ -32,6 +32,7 @@ import { NotificationDispatcher } from "./notification/index.js";
 import { MultimodalManager } from "./multimodal/index.js";
 import { SpeechToText } from "./voice/index.js";
 import { logger } from "./utils/logger.js";
+import { formatErrorMessage } from "./errors/errors.js";
 
 export class LotteApp {
   private config: ConfigLoader | null = null;
@@ -571,7 +572,7 @@ export class LotteApp {
             });
             return result;
           } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorMsg = formatErrorMessage(error);
             auditLog.record({
               sessionId,
               toolName: tool.name,

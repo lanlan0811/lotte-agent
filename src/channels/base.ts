@@ -9,6 +9,7 @@ import type {
   EnqueueCallback,
   MessageContent,
 } from "./types.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export abstract class BaseChannel {
   abstract readonly channelType: ChannelType;
@@ -127,7 +128,7 @@ export abstract class BaseChannel {
         this._onReplySent(this.channelType, payload.senderId, payload.sessionId);
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       console.error(`[${this.channelType}] consumeOne error: ${msg}`);
       try {
         await this.sendText(

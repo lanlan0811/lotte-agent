@@ -2,6 +2,7 @@ import vm from "node:vm";
 import * as acorn from "acorn";
 import type { Node, CallExpression, MemberExpression, Identifier, Literal } from "acorn";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface SandboxConfig {
   timeout: number;
@@ -104,7 +105,7 @@ export class VMSandbox {
         memoryUsedMB: memoryUsed,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = formatErrorMessage(error);
 
       if (errorMessage.includes("timeout") || errorMessage.includes("SIGTERM")) {
         logger.warn(`Sandbox execution timed out after ${this.config.timeout}ms`);
@@ -198,7 +199,7 @@ export class VMSandbox {
         memoryUsedMB: memoryUsed,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = formatErrorMessage(error);
 
       return {
         success: false,
@@ -222,7 +223,7 @@ export class VMSandbox {
         locations: true,
       });
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      errors.push(formatErrorMessage(error));
       return { valid: false, errors };
     }
 

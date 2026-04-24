@@ -8,6 +8,7 @@ import type {
 } from "../types.js";
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export class ConsoleChannel extends BaseChannel {
   readonly channelType: ChannelType = "console";
@@ -63,7 +64,7 @@ export class ConsoleChannel extends BaseChannel {
       logger.info("Console channel started");
     } catch (error) {
       this._status = "error";
-      this._error = error instanceof Error ? error.message : String(error);
+      this._error = formatErrorMessage(error);
       logger.error(`Console channel start failed: ${this._error}`);
     }
   }

@@ -4,6 +4,7 @@ import type {
   WorkflowRun,
 } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export type WorkflowExecutor = (
   node: WorkflowNode,
@@ -134,7 +135,7 @@ export class WorkflowEngine {
     } catch (error) {
       run.status = "failed";
       run.endedAt = Date.now();
-      run.error = error instanceof Error ? error.message : String(error);
+      run.error = formatErrorMessage(error);
       logger.error(`Workflow run failed: ${runId} - ${run.error}`);
     } finally {
       run.results = new Map(context.nodeResults);
@@ -271,7 +272,7 @@ export class WorkflowEngine {
         return result;
       } catch (error) {
         attempts++;
-        const errMsg = error instanceof Error ? error.message : String(error);
+        const errMsg = formatErrorMessage(error);
 
         if (attempts <= maxRetries) {
           logger.warn(`Workflow node ${node.id} retry ${attempts}/${maxRetries}: ${errMsg}`);

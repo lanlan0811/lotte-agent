@@ -3,6 +3,7 @@ import type { GatewayDeps } from "../server.js";
 import { SkillConflictError, suggestConflictName } from "../../skills/hub.js";
 import { SkillScanner } from "../../skills/scanner.js";
 import { getBuiltinSkillDefinitions } from "../../skills/builtins.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export
 interface CreateSkillBody {
@@ -231,7 +232,7 @@ export function registerSkillRoutes(fastify: FastifyInstance, deps: GatewayDeps,
       const results = await hubClient.search(query, { limit, offset });
       return { ok: true, data: results };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(502);
       return { ok: false, error: { code: "HUB_ERROR", message: `Hub search failed: ${msg}` } };
     }
@@ -269,7 +270,7 @@ export function registerSkillRoutes(fastify: FastifyInstance, deps: GatewayDeps,
         };
       }
 
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(502);
       return { ok: false, error: { code: "HUB_ERROR", message: `Hub install failed: ${msg}` } };
     }

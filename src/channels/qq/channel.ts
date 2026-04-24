@@ -9,6 +9,7 @@ import type {
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
 import type { ChannelsConfig } from "../../config/schema.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 import {
   QQ_PROCESSED_IDS_MAX,
   QQ_INVALID_SESSION_OP,
@@ -138,7 +139,7 @@ export class QQChannel extends BaseChannel {
       logger.info("QQ Bot channel started");
     } catch (error) {
       this._status = "error";
-      this._error = error instanceof Error ? error.message : String(error);
+      this._error = formatErrorMessage(error);
       logger.error(`QQ Bot channel start failed: ${this._error}`);
     }
   }

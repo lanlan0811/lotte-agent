@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import type { CronSchedule, CronJob } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 const MIN_REFIRE_GAP_MS = 2000;
 const ERROR_BACKOFF_BASE_MS = 5000;
@@ -352,7 +353,7 @@ export class CronScheduler {
       return result;
     } catch (error) {
       const endedAt = Date.now();
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = formatErrorMessage(error);
 
       job.state.runningAt = null;
       job.state.lastRunAt = startedAt;

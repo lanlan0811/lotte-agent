@@ -1,6 +1,7 @@
 import type { MCPClientConfig } from "../config/schema.js";
 import { EnhancedStatefulClient } from "./stateful-client.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface FailureRecord {
   timestamp: number;
@@ -246,7 +247,7 @@ export class ClientRecovery {
   }
 
   private recordFailure(error: unknown, phase: FailureRecord["phase"]): void {
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorMsg = formatErrorMessage(error);
     const now = Date.now();
 
     const record: FailureRecord = {
@@ -289,7 +290,7 @@ export class ClientRecovery {
     this.state.state = newState;
     this.state.stateEnteredAt = Date.now();
 
-    logger.info(`Recovery: client '${this.clientKey}' state: ${oldState} â†’ ${newState}`);
+    logger.info(`Recovery: client '${this.clientKey}' state: ${oldState} â†?${newState}`);
     this.eventHandlers.stateChanged?.(oldState, newState, this.clientKey);
   }
 

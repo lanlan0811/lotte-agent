@@ -9,6 +9,7 @@ import type {
 import { ILinkClient, type CdnUploadResult } from "./client.js";
 import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 import type { ChannelsConfig } from "../../config/schema.js";
 import { WEIXIN_PROCESSED_IDS_MAX, WEIXIN_TYPING_STATUS_START, WEIXIN_TYPING_STATUS_STOP } from "./constants.js";
 import { ensureMediaDir, safeFilename } from "./utils.js";
@@ -129,7 +130,7 @@ export class WeixinChannel extends BaseChannel {
       logger.info("WeChat channel started");
     } catch (error) {
       this._status = "error";
-      this._error = error instanceof Error ? error.message : String(error);
+      this._error = formatErrorMessage(error);
       logger.error(`WeChat channel start failed: ${this._error}`);
     }
   }

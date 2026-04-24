@@ -1,6 +1,7 @@
 import type { NotificationEvent, NotificationResult } from "./types.js";
 import type { ChannelManager } from "../channels/manager.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export class MessageNotifier {
   private channelManager: ChannelManager | null;
@@ -40,7 +41,7 @@ export class MessageNotifier {
         await this.channelManager.sendCrossChannel(channelId, "notification", text);
         results.push({ channel: channelId, success: true });
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.error(`Message notification failed for channel ${channelId}: ${msg}`);
         results.push({ channel: channelId, success: false, error: msg });
       }
@@ -56,8 +57,8 @@ export class MessageNotifier {
 
   private getEventEmoji(type: string): string {
     const emojiMap: Record<string, string> = {
-      "cron.complete": "✅",
-      "cron.error": "❌",
+      "cron.complete": "�?,
+      "cron.error": "�?,
       "approval.request": "🔔",
       "approval.resolved": "✔️",
       "channel.status": "📡",

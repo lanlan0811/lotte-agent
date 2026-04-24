@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import type { ToolDefinition } from "../tool-registry.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
@@ -164,7 +165,7 @@ export const browserNavigateTool: ToolDefinition = {
 
       return `Navigated to: ${parsed.url}\nTitle: ${title}\nStatus: ${status}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error navigating to ${parsed.url}: ${msg}`;
     }
   },
@@ -214,7 +215,7 @@ export const browserScreenshotTool: ToolDefinition = {
 
       return `Screenshot captured (${sizeKB} KB)\ndata:image/png;base64,${base64.slice(0, 100)}...`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error taking screenshot: ${msg}`;
     }
   },
@@ -236,7 +237,7 @@ export const browserClickTool: ToolDefinition = {
       await page.click(parsed.selector, { timeout: DEFAULT_TIMEOUT });
       return `Clicked: ${parsed.selector}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error clicking ${parsed.selector}: ${msg}`;
     }
   },
@@ -258,7 +259,7 @@ export const browserFillTool: ToolDefinition = {
       await page.fill(parsed.selector, parsed.value, { timeout: DEFAULT_TIMEOUT });
       return `Filled ${parsed.selector} with: ${parsed.value}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error filling ${parsed.selector}: ${msg}`;
     }
   },
@@ -297,7 +298,7 @@ export const browserExtractTool: ToolDefinition = {
 
       return `Found ${elements.length} element(s), showing ${Math.min(elements.length, 50)}:\n${results.filter(Boolean).join("\n")}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error extracting from ${parsed.selector}: ${msg}`;
     }
   },
@@ -325,7 +326,7 @@ export const browserExecuteTool: ToolDefinition = {
       const output = typeof result === "string" ? result : JSON.stringify(result, null, 2);
       return `Result: ${output}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error executing script: ${msg}`;
     }
   },
@@ -347,7 +348,7 @@ export const browserHoverTool: ToolDefinition = {
       await page.hover(parsed.selector, { timeout: DEFAULT_TIMEOUT });
       return `Hovered: ${parsed.selector}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error hovering ${parsed.selector}: ${msg}`;
     }
   },
@@ -369,7 +370,7 @@ export const browserSelectTool: ToolDefinition = {
       await page.selectOption(parsed.selector, parsed.value, { timeout: DEFAULT_TIMEOUT });
       return `Selected "${parsed.value}" in ${parsed.selector}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error selecting in ${parsed.selector}: ${msg}`;
     }
   },
@@ -415,7 +416,7 @@ export const browserScrollTool: ToolDefinition = {
 
       return `Scrolled ${parsed.direction} by ${parsed.amount}px`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error scrolling: ${msg}`;
     }
   },
@@ -446,7 +447,7 @@ export const browserWaitTool: ToolDefinition = {
       await page.waitForTimeout(parsed.timeout);
       return `Waited ${parsed.timeout}ms`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error waiting: ${msg}`;
     }
   },
@@ -477,7 +478,7 @@ export const browserTypeTool: ToolDefinition = {
 
       return `Typed "${parsed.text}" into ${parsed.selector}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error typing into ${parsed.selector}: ${msg}`;
     }
   },
@@ -499,7 +500,7 @@ export const browserUploadTool: ToolDefinition = {
       await page.setInputFiles(parsed.selector, parsed.filePath, { timeout: DEFAULT_TIMEOUT });
       return `Uploaded file "${parsed.filePath}" to ${parsed.selector}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error uploading to ${parsed.selector}: ${msg}`;
     }
   },
@@ -523,7 +524,7 @@ export const browserGoBackTool: ToolDefinition = {
       const url = page.url();
       return `Navigated back to: ${url}\nTitle: ${title}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error navigating back: ${msg}`;
     }
   },
@@ -547,7 +548,7 @@ export const browserGoForwardTool: ToolDefinition = {
       const url = page.url();
       return `Navigated forward to: ${url}\nTitle: ${title}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error navigating forward: ${msg}`;
     }
   },
@@ -569,7 +570,7 @@ export const browserPressKeyTool: ToolDefinition = {
       await page.keyboard.press(parsed.key);
       return `Pressed key: ${parsed.key}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error pressing key ${parsed.key}: ${msg}`;
     }
   },
@@ -603,7 +604,7 @@ export const browserGetContentTool: ToolDefinition = {
       const truncated = html.length > 10000 ? html.slice(0, 10000) + "\n... (truncated)" : html;
       return `Page HTML:\n${truncated}`;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       return `Error getting content: ${msg}`;
     }
   },

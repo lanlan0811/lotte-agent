@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerRAGRoutes(
   fastify: FastifyInstance,
@@ -30,7 +31,7 @@ export function registerRAGRoutes(
         data: { documents, total, limit, offset },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "RAG_LIST_ERROR", message: msg, details: null },
@@ -69,7 +70,7 @@ export function registerRAGRoutes(
       const document = await ragManager.uploadDocument(body.file_path);
       reply.status(201).send({ ok: true, data: { document } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "RAG_UPLOAD_ERROR", message: msg, details: null },
@@ -101,7 +102,7 @@ export function registerRAGRoutes(
 
       reply.send({ ok: true, data: { id, deleted: true } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "RAG_DELETE_ERROR", message: msg, details: null },
@@ -150,7 +151,7 @@ export function registerRAGRoutes(
         data: { results: formatted, total: formatted.length },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "RAG_SEARCH_ERROR", message: msg, details: null },
@@ -177,7 +178,7 @@ export function registerRAGRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "RAG_STATS_ERROR", message: msg, details: null },

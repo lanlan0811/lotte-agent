@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
 import { auditLog } from "../../tools/impl/audit-tool.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 export function registerLogRoutes(
   fastify: FastifyInstance,
@@ -43,7 +44,7 @@ export function registerLogRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "LOG_QUERY_ERROR", message: msg, details: null },

@@ -1,5 +1,6 @@
 import type { NotificationEvent, NotificationResult } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 export interface WebhookConfig {
   enabled: boolean;
@@ -59,7 +60,7 @@ export class WebhookNotifier {
           break;
         }
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = formatErrorMessage(error);
         logger.debug(`Webhook attempt ${attempt} failed: ${lastError}`);
       }
 

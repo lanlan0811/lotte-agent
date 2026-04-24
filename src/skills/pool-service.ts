@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { SkillManifest, SkillPoolManifest } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 const TEMP_SUFFIX = ".tmp";
 const LOCK_SUFFIX = ".lock";
@@ -249,7 +250,7 @@ export class SkillPoolService {
       logger.info(`Skill '${skillName}' transferred to workspace: ${workspaceDir}`);
       return { name: skillName, transferred: true };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       logger.error(`Failed to transfer skill '${skillName}' to workspace: ${msg}`);
       return { name: skillName, transferred: false, error: msg };
     }
@@ -301,7 +302,7 @@ export class SkillPoolService {
       logger.info(`Skill '${skillName}' transferred from workspace: ${workspaceDir}`);
       return { name: skillName, transferred: true };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       logger.error(`Failed to transfer skill '${skillName}' from workspace: ${msg}`);
       return { name: skillName, transferred: false, error: msg };
     }
@@ -349,7 +350,7 @@ export class SkillPoolService {
           this.manifest.skills[name] = manifest;
           result.added.push(name);
         } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
+          const msg = formatErrorMessage(error);
           result.errors.push({ name, error: msg });
         }
       } else {
@@ -368,7 +369,7 @@ export class SkillPoolService {
               this.writeSkillToDisk(existing);
               result.updated.push(name);
             } catch (error) {
-              const msg = error instanceof Error ? error.message : String(error);
+              const msg = formatErrorMessage(error);
               result.errors.push({ name, error: msg });
             }
           }

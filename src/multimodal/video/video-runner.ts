@@ -6,6 +6,7 @@ import os from "node:os";
 import type { VideoConfig, ImageContent } from "../types.js";
 import { ImageLoader } from "../vision/image-loader.js";
 import { logger } from "../../utils/logger.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -139,7 +140,7 @@ export class VideoRunner {
     } catch (error) {
       logger.error(`Video keyframe extraction failed: ${error}`);
       throw new Error(
-        `Failed to extract video keyframes. Ensure ffmpeg is installed. Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to extract video keyframes. Ensure ffmpeg is installed. Error: ${formatErrorMessage(error)}`,
       );
     } finally {
       try {

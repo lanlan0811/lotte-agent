@@ -10,6 +10,7 @@ import { MessageRenderer } from "../renderer.js";
 import { logger } from "../../utils/logger.js";
 import type { ChannelsConfig } from "../../config/schema.js";
 import type { Database } from "../../db/database.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -157,7 +158,7 @@ export class FeishuChannel extends BaseChannel {
       );
     } catch (error) {
       this._status = "error";
-      this._error = error instanceof Error ? error.message : String(error);
+      this._error = formatErrorMessage(error);
       logger.error(`Feishu channel start failed: ${this._error}`);
     }
   }
