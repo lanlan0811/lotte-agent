@@ -80,7 +80,10 @@ export class GeminiProvider extends BaseProvider {
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.getApiKey(),
+        },
         body: JSON.stringify(geminiRequest),
         signal: AbortSignal.timeout(120000),
       });
@@ -108,7 +111,10 @@ export class GeminiProvider extends BaseProvider {
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.getApiKey(),
+        },
         body: JSON.stringify(geminiRequest),
         signal: AbortSignal.timeout(120000),
       });
@@ -214,7 +220,7 @@ export class GeminiProvider extends BaseProvider {
   private buildUrl(model: string, stream: boolean): string {
     const baseUrl = this.getApiUrl() || "https://generativelanguage.googleapis.com";
     const action = stream ? "streamGenerateContent" : "generateContent";
-    return `${baseUrl}/v1beta/models/${model}:${action}?key=${this.getApiKey()}`;
+    return `${baseUrl}/v1beta/models/${model}:${action}`;
   }
 
   private convertRequest(request: ChatCompletionRequest): GeminiRequest {

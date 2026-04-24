@@ -20,6 +20,70 @@ export function registerConfigRoutes(
   deps: GatewayDeps,
   prefix: string,
 ): void {
+  fastify.get(`${prefix}/config`, async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const config = deps.app.getConfig();
+      const data: Record<string, unknown> = {
+        main: config.getMain(),
+        ai: config.getAI(),
+        gateway: config.getGateway(),
+        channels: config.getChannels(),
+        mcp: config.getMCP(),
+        skills: config.getSkills(),
+        tools: config.getTools(),
+        automation: config.getAutomation(),
+        notification: config.getNotification(),
+        rag: config.getRAG(),
+        multimodal: config.getMultimodal(),
+      };
+      reply.send({ ok: true, data });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      reply.status(500).send({
+        ok: false,
+        error: { code: "CONFIG_GET_ERROR", message: msg, details: null },
+      });
+    }
+  });
+
+  fastify.put(`${prefix}/config`, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const body = (request.body as Record<string, unknown>) ?? {};
+      const config = deps.app.getConfig();
+
+      const moduleMap: Record<string, string> = {
+        main: "main",
+        ai: "ai",
+        gateway: "gateway",
+        channels: "channels",
+        mcp: "mcp",
+        skills: "skills",
+        tools: "tools",
+        automation: "automation",
+        notification: "notification",
+        rag: "rag",
+        multimodal: "multimodal",
+      };
+
+      const updated: string[] = [];
+
+      for (const [key, moduleName] of Object.entries(moduleMap)) {
+        if (body[key] !== undefined) {
+          await config.saveModule(moduleName, body[key] as Record<string, unknown>);
+          updated.push(moduleName);
+        }
+      }
+
+      reply.send({ ok: true, data: { updated } });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      reply.status(500).send({
+        ok: false,
+        error: { code: "CONFIG_UPDATE_ERROR", message: msg, details: null },
+      });
+    }
+  });
+
   fastify.get(`${prefix}/config/:module`, async (request: FastifyRequest, reply: FastifyReply) => {
     const { module } = request.params as { module: string };
 
@@ -190,6 +254,75 @@ export function registerConfigRoutes(
       reply.status(500).send({
         ok: false,
         error: { code: "CACHE_ERROR", message: msg, details: null },
+      });
+    }
+  });
+
+  fastify.post(`${prefix}/config/test-connection`, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { url?: string; apiKey?: string; model?: string };
+
+    if (!body.url) {
+      reply.status(400).send({
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "url is required",
+          details: null,
+        },
+      });
+      return;
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (body.apiKey) {
+        headers["Authorization"] = `Bearer ${body.apiKey}`;
+      }
+
+      const testBody = {
+        model: body.model || "gpt-4o",
+        messages: [{ role: "user", content: "Hi" }],
+        max_tokens: 1,
+        stream: false,
+      };
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(`${body.url.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(testBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok || response.status === 200) {
+        reply.send({ ok: true, data: { connected: true, statusCode: response.status } });
+      } else {
+        const errorText = await response.text().catch(() => "");
+        reply.send({
+          ok: false,
+          error: {
+            code: "CONNECTION_FAILED",
+            message: `Server returned ${response.status}: ${errorText.slice(0, 200)}`,
+            details: { statusCode: response.status },
+          },
+        });
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      reply.send({
+        ok: false,
+        error: {
+          code: "CONNECTION_ERROR",
+          message: msg,
+          details: null,
+        },
       });
     }
   });

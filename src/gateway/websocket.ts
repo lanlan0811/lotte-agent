@@ -168,8 +168,18 @@ export class WebSocketManager {
     this.startHandshake(clientId);
 
     ws.on("message", (data: RawData) => {
+      const raw = data.toString();
+
+      if (raw === "ping") {
+        client.lastActivity = Date.now();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("pong");
+        }
+        return;
+      }
+
       try {
-        const message = JSON.parse(data.toString()) as GatewayFrame;
+        const message = JSON.parse(raw) as GatewayFrame;
         this.handleMessage(clientId, message);
       } catch {
         this.sendError(clientId, "", "PARSE_ERROR", "Invalid JSON message");
@@ -197,17 +207,21 @@ export class WebSocketManager {
     });
   }
 
+  private resolveEffectiveAuthMode(): "token" | "password" | "none" {
+    const authConfig = this.deps.config.auth;
+    if (authConfig.mode === "none") return "none";
+    if (authConfig.mode === "token" && !authConfig.token) return "none";
+    if (authConfig.mode === "password" && !authConfig.password) return "none";
+    return authConfig.mode;
+  }
+
   private startHandshake(clientId: string): void {
     const client = this.clients.get(clientId);
     if (!client) return;
 
-    const authConfig: AuthConfig = {
-      mode: this.deps.config.auth.mode,
-      token: this.deps.config.auth.token,
-      password: this.deps.config.auth.password,
-    };
+    const effectiveMode = this.resolveEffectiveAuthMode();
 
-    if (authConfig.mode === "none") {
+    if (effectiveMode === "none") {
       client.authenticated = true;
       client.clientInfo = { id: "anonymous", version: "0.0.0", platform: "unknown", mode: "default" };
       this.sendResponse(clientId, "", true, {
@@ -240,7 +254,7 @@ export class WebSocketManager {
       type: "challenge",
       protocol: 1,
       nonce,
-      methods: authConfig.mode === "token" ? ["hmac-token"] : ["hmac-password"],
+      methods: effectiveMode === "token" ? ["hmac-token"] : ["hmac-password"],
       timeoutMs: handshakeTimeout,
     });
   }
@@ -342,17 +356,18 @@ export class WebSocketManager {
     const authParams = params?.auth as { token?: string; password?: string; challengeResponse?: string; method?: string } | undefined;
     const clientParams = params?.client as { id?: string; version?: string; platform?: string; mode?: string } | undefined;
 
-    const authConfig: AuthConfig = {
-      mode: this.deps.config.auth.mode,
-      token: this.deps.config.auth.token,
-      password: this.deps.config.auth.password,
-    };
+    const effectiveMode = this.resolveEffectiveAuthMode();
 
     let authResult: AuthResult;
 
-    if (authConfig.mode === "none") {
+    if (effectiveMode === "none") {
       authResult = { authenticated: true, method: "none" };
     } else if (authParams?.challengeResponse && client.challenge && !client.challenge.resolved) {
+      const authConfig: AuthConfig = {
+        mode: this.deps.config.auth.mode,
+        token: this.deps.config.auth.token,
+        password: this.deps.config.auth.password,
+      };
       const secret = authConfig.mode === "token" ? authConfig.token : authConfig.password;
       if (!secret) {
         authResult = { authenticated: false, reason: "Server secret not configured" };
@@ -367,12 +382,22 @@ export class WebSocketManager {
         authResult = { authenticated: false, reason: "Invalid challenge response" };
       }
     } else if (authParams?.token) {
+      const authConfig: AuthConfig = {
+        mode: this.deps.config.auth.mode,
+        token: this.deps.config.auth.token,
+        password: this.deps.config.auth.password,
+      };
       if (authConfig.token && safeEqual(authParams.token, authConfig.token)) {
         authResult = { authenticated: true, method: "token", user: "token-user" };
       } else {
         authResult = { authenticated: false, reason: "Invalid token" };
       }
     } else if (authParams?.password) {
+      const authConfig: AuthConfig = {
+        mode: this.deps.config.auth.mode,
+        token: this.deps.config.auth.token,
+        password: this.deps.config.auth.password,
+      };
       if (authConfig.password && safeEqual(authParams.password, authConfig.password)) {
         authResult = { authenticated: true, method: "password", user: "password-user" };
       } else {

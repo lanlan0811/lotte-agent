@@ -528,13 +528,9 @@ export function ChatView() {
     addMessage(sessionId, assistantMsg);
 
     if (wsClient.connected) {
-      wsClient.send({
-        type: "chat.send",
-        data: {
-          sessionId,
-          messageId: assistantMsg.id,
-          text,
-        },
+      wsClient.sendRequest("chat.send", {
+        sessionId,
+        message: text,
       });
       setSending(false);
       return;
@@ -542,8 +538,8 @@ export function ChatView() {
 
     try {
       const result = await apiClient.post<{ response?: string }>(
-        `/api/v1/chat/${sessionId}`,
-        { text },
+        `/api/v1/chat/send`,
+        { sessionId, message: text },
       );
 
       if (result.ok && result.data) {
@@ -593,13 +589,9 @@ export function ChatView() {
     });
 
     if (wsClient.connected) {
-      wsClient.send({
-        type: "chat.send",
-        data: {
-          sessionId: activeSessionId,
-          messageId: msgId,
-          text: lastUserMsg.content,
-        },
+      wsClient.sendRequest("chat.send", {
+        sessionId: activeSessionId,
+        message: lastUserMsg.content,
       });
       return;
     }

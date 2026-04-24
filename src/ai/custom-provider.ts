@@ -8,6 +8,8 @@ import type {
 import type { ProviderConfig } from "./types.js";
 import { logger } from "../utils/logger.js";
 
+const DEFAULT_TIMEOUT_MS = 60000;
+
 export class CustomProvider extends BaseProvider {
   readonly id = "custom";
   readonly name = "Custom";
@@ -36,6 +38,7 @@ export class CustomProvider extends BaseProvider {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -73,6 +76,7 @@ export class CustomProvider extends BaseProvider {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       });
 
       if (!response.ok) {

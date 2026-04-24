@@ -107,19 +107,8 @@ export abstract class MCPStatefulClient {
   abstract get transport(): string;
   abstract get capabilities(): MCPCapabilities | null;
 
-  getToolsSnapshot(): MCPTool[] {
-    return [];
-  }
-
-  getResourcesSnapshot(): MCPResource[] {
-    return [];
-  }
-
-  getPromptsSnapshot(): MCPPrompt[] {
-    return [];
-  }
-
-  getConfig(): MCPClientConfig {
-    throw new Error("getConfig() not implemented");
-  }
+  abstract getToolsSnapshot(): MCPTool[];
+  abstract getResourcesSnapshot(): MCPResource[];
+  abstract getPromptsSnapshot(): MCPPrompt[];
+  abstract getConfig(): MCPClientConfig;
 }

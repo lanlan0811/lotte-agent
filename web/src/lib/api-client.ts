@@ -62,7 +62,9 @@ export class ApiClient {
           if (errorBody?.error?.message) {
             errorMessage = errorBody.error.message;
           }
-        } catch {}
+        } catch {
+          console.debug("[api-client] Failed to parse error response body");
+        }
 
         return {
           ok: false,

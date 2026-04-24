@@ -67,6 +67,14 @@ export function authenticateRequest(request: FastifyRequest, config: AuthConfig)
     return { authenticated: true, method: "none" };
   }
 
+  if (config.mode === "token" && !config.token) {
+    return { authenticated: true, method: "none" };
+  }
+
+  if (config.mode === "password" && !config.password) {
+    return { authenticated: true, method: "none" };
+  }
+
   if (config.mode === "token") {
     const token = extractBearerToken(request);
     if (!token) {

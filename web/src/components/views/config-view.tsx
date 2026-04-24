@@ -7,6 +7,7 @@ import {
 import { useAppStore, type AppConfig } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
+import { wsClient } from "@/lib/ws-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -59,6 +60,9 @@ export function ConfigView() {
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [wsAuthMode, setWsAuthMode] = useState<"token" | "password" | "none">("none");
+  const [wsAuthSecret, setWsAuthSecret] = useState("");
+  const [showWsSecret, setShowWsSecret] = useState(false);
 
   const [aiProviders, setAiProviders] = useState<AiProvider[]>([]);
   const [gatewayCfg, setGatewayCfg] = useState<GatewayConfig>({
@@ -76,84 +80,132 @@ export function ConfigView() {
 
   useEffect(() => {
     loadConfig();
+    const creds = wsClient.getCredentials();
+    setWsAuthMode(creds.mode);
+    if (creds.mode === "token" && creds.token) setWsAuthSecret(creds.token);
+    if (creds.mode === "password" && creds.password) setWsAuthSecret(creds.password);
   }, []);
 
   const loadConfig = useCallback(async () => {
-    const result = await apiClient.get<AppConfig>("/api/v1/config");
+    const result = await apiClient.get<Record<string, unknown>>("/api/v1/config");
     if (result.ok && result.data) {
-      setConfig(result.data);
-      const d = result.data;
+      const d = result.data as Record<string, unknown>;
+
       if (d.ai) {
-        const providers: AiProvider[] = [];
         const ai = d.ai as Record<string, unknown>;
-        if (ai.providers && Array.isArray(ai.providers)) {
-          for (const p of ai.providers as Record<string, unknown>[]) {
+        const providers: AiProvider[] = [];
+        const defaultProvider = String(ai.default_provider || "");
+        const defaultModel = String(ai.default_model || "");
+
+        if (ai.providers && typeof ai.providers === "object" && !Array.isArray(ai.providers)) {
+          const providersMap = ai.providers as Record<string, unknown>;
+          for (const [name, value] of Object.entries(providersMap)) {
+            const p = value as Record<string, unknown>;
+            const modelsMap = (p.models as Record<string, unknown>) || {};
+            const modelNames = Object.keys(modelsMap);
             providers.push({
-              name: String(p.name || ""),
-              url: String(p.url || ""),
-              apiKey: String(p.apiKey || ""),
-              models: Array.isArray(p.models) ? p.models.map(String) : [],
-              defaultModel: String(p.defaultModel || ""),
+              name,
+              url: String(p.api_url || ""),
+              apiKey: String(p.api_key || ""),
+              models: modelNames,
+              defaultModel: name === defaultProvider ? defaultModel : (modelNames[0] || ""),
             });
           }
         }
         setAiProviders(providers);
       }
+
       if (d.gateway) {
         const gw = d.gateway as Record<string, unknown>;
+        const auth = (gw.auth as Record<string, unknown>) || {};
         const web = (gw.web as Record<string, unknown>) || {};
         setGatewayCfg({
-          host: String(gw.host || "0.0.0.0"),
-          port: Number(gw.port || 3000),
-          authMode: String(gw.authMode || "token"),
-          token: String(gw.token || ""),
+          host: String(gw.host || "127.0.0.1"),
+          port: Number(gw.port || 10623),
+          authMode: String(auth.mode || "token"),
+          token: String(auth.token || ""),
           web: {
             enabled: Boolean(web.enabled),
             root: String(web.root || ""),
-            basePath: String(web.basePath || "/"),
+            basePath: String(web.base_path || "/"),
           },
         });
       }
+
       if (d.tools) {
         const tools = d.tools as Record<string, unknown>;
-        const shell = (tools.shell as Record<string, unknown>) || {};
-        const gitBash = (tools.gitBash as Record<string, unknown>) || {};
-        const fs = (tools.fileSystem as Record<string, unknown>) || {};
+        const bash = (tools.bash as Record<string, unknown>) || {};
+        const git = (tools.git as Record<string, unknown>) || {};
+        const file = (tools.file as Record<string, unknown>) || {};
         setToolCfg({
-          shell: { enabled: Boolean(shell.enabled ?? true), timeout: Number(shell.timeout || 30000) },
-          gitBash: { enabled: Boolean(gitBash.enabled ?? true), path: String(gitBash.path || "") },
+          shell: { enabled: Boolean(bash.enabled ?? true), timeout: Number(bash.timeout || 30000) },
+          gitBash: { enabled: Boolean(git.enabled ?? true), path: "" },
           fileSystem: {
-            enabled: Boolean(fs.enabled ?? false),
-            allowedPaths: Array.isArray(fs.allowedPaths) ? fs.allowedPaths.map(String) : [],
+            enabled: Boolean(file.enabled ?? false),
+            allowedPaths: Array.isArray(file.allowed_paths) ? file.allowed_paths.map(String) : [],
           },
         });
       }
+
+      setConfig(d as unknown as AppConfig);
     }
   }, [setConfig]);
 
   const handleSave = async () => {
     setSaving(true);
+
+    const providersMap: Record<string, unknown> = {};
+    let defaultProvider = "";
+    let defaultModel = "";
+    for (const p of aiProviders) {
+      if (!p.name) continue;
+      const modelsMap: Record<string, unknown> = {};
+      for (const m of p.models) {
+        modelsMap[m] = { context_window: 128000, max_output: 16384 };
+      }
+      providersMap[p.name] = {
+        api_url: p.url,
+        api_key: p.apiKey,
+        models: modelsMap,
+      };
+      if (!defaultProvider) {
+        defaultProvider = p.name;
+        defaultModel = p.defaultModel || p.models[0] || "";
+      }
+    }
+
     const payload: Record<string, unknown> = {
       ai: {
-        providers: aiProviders.map((p) => ({
-          name: p.name,
-          url: p.url,
-          apiKey: p.apiKey,
-          models: p.models,
-          defaultModel: p.defaultModel,
-        })),
+        default_provider: defaultProvider,
+        default_model: defaultModel,
+        providers: providersMap,
       },
       gateway: {
         host: gatewayCfg.host,
         port: gatewayCfg.port,
-        authMode: gatewayCfg.authMode,
-        token: gatewayCfg.token,
-        web: gatewayCfg.web,
+        auth: {
+          mode: gatewayCfg.authMode,
+          token: gatewayCfg.authMode === "token" ? gatewayCfg.token : "",
+          password: gatewayCfg.authMode === "password" ? gatewayCfg.token : "",
+        },
+        web: {
+          enabled: gatewayCfg.web.enabled,
+          root: gatewayCfg.web.root,
+          base_path: gatewayCfg.web.basePath,
+        },
       },
       tools: {
-        shell: toolCfg.shell,
-        gitBash: toolCfg.gitBash,
-        fileSystem: toolCfg.fileSystem,
+        bash: {
+          enabled: toolCfg.shell.enabled,
+          timeout: toolCfg.shell.timeout,
+        },
+        git: {
+          enabled: toolCfg.gitBash.enabled,
+        },
+        file: {
+          enabled: toolCfg.fileSystem.enabled,
+          allowed_paths: toolCfg.fileSystem.allowedPaths,
+        },
       },
     };
     const result = await apiClient.put("/api/v1/config", payload);
@@ -452,6 +504,74 @@ export function ConfigView() {
                     </div>
                   </div>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">WebSocket {t("config.authMode") || "Authentication"}</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                {t("config.wsAuthHint") || "Credentials for WebSocket connection to the server"}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t("config.authMode") || "Auth Mode"}</Label>
+                  <Select
+                    value={wsAuthMode}
+                    onValueChange={(v) => {
+                      setWsAuthMode(v as "token" | "password" | "none");
+                      if (v === "none") setWsAuthSecret("");
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="token">Token</SelectItem>
+                      <SelectItem value="password">{t("config.password") || "Password"}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {wsAuthMode !== "none" && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">{wsAuthMode === "token" ? "Token" : t("config.password") || "Password"}</Label>
+                    <div className="relative">
+                      <Input
+                        value={wsAuthSecret}
+                        onChange={(e) => setWsAuthSecret(e.target.value)}
+                        type={showWsSecret ? "text" : "password"}
+                        placeholder={wsAuthMode === "token" ? "Enter token..." : "Enter password..."}
+                        className="h-8 text-sm pr-8"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-8 w-8"
+                        onClick={() => setShowWsSecret(!showWsSecret)}
+                      >
+                        {showWsSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-7 text-xs"
+                  onClick={() => {
+                    wsClient.setCredentials(wsAuthMode, wsAuthSecret || undefined);
+                    wsClient.disconnect();
+                    setTimeout(() => wsClient.connect(), 500);
+                  }}
+                >
+                  {t("common.save") || "Save & Reconnect"}
+                </Button>
               </div>
             </CardContent>
           </Card>

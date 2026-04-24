@@ -69,7 +69,9 @@ function loadCredentials(): AuthCredentials {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (raw) return JSON.parse(raw) as AuthCredentials;
-  } catch {}
+  } catch (e) {
+    console.debug("[ws-client] Failed to load credentials from localStorage", e);
+  }
   return { mode: "none" };
 }
 
@@ -77,7 +79,9 @@ function saveCredentials(creds: AuthCredentials): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(creds));
-  } catch {}
+  } catch (e) {
+    console.debug("[ws-client] Failed to save credentials to localStorage", e);
+  }
 }
 
 async function computeHmacSha256(key: string, message: string): Promise<string> {
@@ -118,6 +122,7 @@ export class WebSocketClient {
   private pendingChallenge: ChallengeFrame | null = null;
   private requestId = 0;
   private connId: string | null = null;
+  private authFailed = false;
 
   constructor(url?: string) {
     this.url = url || `${WS_BASE}/ws`;
@@ -128,6 +133,7 @@ export class WebSocketClient {
     this.intentionalClose = false;
     this.handshakeComplete = false;
     this.pendingChallenge = null;
+    this.authFailed = false;
     this.setStatus("connecting");
 
     try {
@@ -150,7 +156,9 @@ export class WebSocketClient {
 
           const frame = JSON.parse(data) as GatewayFrame;
           this.handleFrame(frame);
-        } catch {}
+        } catch (e) {
+          console.debug("[ws-client] Failed to parse WebSocket message", e);
+        }
       };
 
       this.ws.onclose = (event) => {
@@ -158,6 +166,10 @@ export class WebSocketClient {
         this.handshakeComplete = false;
         this.pendingChallenge = null;
         this.setStatus("disconnected");
+
+        if (this.authFailed) {
+          return;
+        }
 
         if (!this.intentionalClose && event.code !== 1000) {
           this.scheduleReconnect();
@@ -261,7 +273,9 @@ export class WebSocketClient {
     for (const handler of this.statusListeners) {
       try {
         handler(status);
-      } catch {}
+      } catch (e) {
+        console.debug("[ws-client] Status listener error", e);
+      }
     }
   }
 
@@ -283,6 +297,7 @@ export class WebSocketClient {
     if (frame.type === "res" && !frame.ok && frame.error) {
       if (frame.error.code === "AUTH_REQUIRED" || frame.error.code === "AUTH_FAILED") {
         this.handshakeComplete = false;
+        this.authFailed = true;
         this.setStatus("authenticating");
         return;
       }
@@ -389,7 +404,9 @@ export class WebSocketClient {
       for (const handler of handlers) {
         try {
           handler(event);
-        } catch {}
+        } catch (e) {
+          console.debug("[ws-client] Event handler error", e);
+        }
       }
     }
     const wildcardHandlers = this.listeners.get("*");
@@ -397,7 +414,9 @@ export class WebSocketClient {
       for (const handler of wildcardHandlers) {
         try {
           handler(event);
-        } catch {}
+        } catch (e) {
+          console.debug("[ws-client] Wildcard handler error", e);
+        }
       }
     }
   }
