@@ -290,7 +290,7 @@ export class ClientRecovery {
     this.state.state = newState;
     this.state.stateEnteredAt = Date.now();
 
-    logger.info(`Recovery: client '${this.clientKey}' state: ${oldState} â†?${newState}`);
+    logger.info(`Recovery: client '${this.clientKey}' state: ${oldState} -> ${newState}`);
     this.eventHandlers.stateChanged?.(oldState, newState, this.clientKey);
   }
 

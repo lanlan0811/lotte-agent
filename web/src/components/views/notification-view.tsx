@@ -196,7 +196,7 @@ export function NotificationView() {
     setIsSubmitting(true);
     try {
       if (editingRuleId) {
-        const res = await apiClient.put(`/api/v1/notification/rules/${editingRuleId}`, {
+        const res = await apiClient.put<NotificationRule>(`/api/v1/notification/rules/${editingRuleId}`, {
           name: formData.name.trim(),
           eventTypes: formData.eventTypes.split(",").map((s) => s.trim()).filter(Boolean),
           channels: [{ type: formData.channelType, target: formData.channelTarget.trim() }],

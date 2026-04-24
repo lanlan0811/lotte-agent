@@ -3,7 +3,9 @@ import zh from "./zh.json";
 
 export type Locale = "en" | "zh";
 
-const messages: Record<Locale, Record<string, Record<string, string>>> = { en, zh };
+type NestedValue = string | Record<string, string>;
+
+const messages: Record<Locale, Record<string, Record<string, NestedValue>>> = { en, zh };
 
 let currentLocale: Locale = "zh";
 
@@ -32,7 +34,9 @@ export function t(key: string, params?: Record<string, string | number>): string
   if (parts.length !== 2) return key;
 
   const [section, item] = parts;
-  const msg = messages[currentLocale]?.[section]?.[item] || messages.en?.[section]?.[item] || key;
+  let msg = messages[currentLocale]?.[section]?.[item] || messages.en?.[section]?.[item] || key;
+
+  if (typeof msg !== "string") return key;
 
   if (!params) return msg;
 

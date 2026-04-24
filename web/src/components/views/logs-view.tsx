@@ -69,7 +69,7 @@ export function LogsView() {
       if (event.type === "log.entry" || event.data?.level) {
         const entry = event.data as unknown as LogEntry;
         if (entry.timestamp && entry.level && entry.message) {
-          setLogs((prev) => [...prev.slice(-(pageSize - 1)), entry]);
+          setLogs([...logs.slice(-(pageSize - 1)), entry]);
           setTotalLogs((prev) => prev + 1);
         }
       }
