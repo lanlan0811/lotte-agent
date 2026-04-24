@@ -89,6 +89,8 @@ export const WeixinChannelSchema = z.object({
   group_policy: z.enum(["open", "allowlist", "denylist"]).default("open"),
   allow_from: z.array(z.string()).default([]),
   deny_message: z.string().default(""),
+  typing_indicator: z.boolean().default(true),
+  voice_asr: z.boolean().default(false),
 });
 
 export const QQChannelSchema = z.object({
@@ -98,6 +100,7 @@ export const QQChannelSchema = z.object({
   bot_prefix: z.string().default(""),
   markdown_enabled: z.boolean().default(true),
   max_reconnect_attempts: z.number().int().positive().default(100),
+  media_dir: z.string().default(""),
 });
 
 export const FeishuChannelSchema = z.object({

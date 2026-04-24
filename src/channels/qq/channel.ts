@@ -25,7 +25,11 @@ import {
   isUrlContentError,
   sanitizeQqText,
   aggressiveSanitizeQqText,
+  ensureMediaDir,
+  safeFilename,
 } from "./utils.js";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 type QQConfig = ChannelsConfig["qq"];
 
@@ -62,6 +66,7 @@ export class QQChannel extends BaseChannel {
   private reconnectAttempts = 0;
   private renderer: MessageRenderer;
   private processedIds: Set<string> = new Set();
+  private mediaDir: string;
   private sessionId: string | null = null;
   private quickDisconnect: QuickDisconnectState = {
     count: 0,
@@ -77,6 +82,7 @@ export class QQChannel extends BaseChannel {
       supportsCodeFence: config.markdown_enabled,
       useEmoji: true,
     });
+    this.mediaDir = ensureMediaDir(config.media_dir || undefined);
   }
 
   override resolveSessionId(senderId: string, meta?: Record<string, unknown>): string {
@@ -637,6 +643,23 @@ export class QQChannel extends BaseChannel {
       return `/v2/groups/${openId}/files`;
     }
     return null;
+  }
+
+  async downloadFile(fileUrl: string, filename: string): Promise<string | null> {
+    try {
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        logger.warn(`QQ download file failed: ${response.status}`);
+        return null;
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const localPath = join(this.mediaDir, safeFilename(filename));
+      await writeFile(localPath, buffer);
+      return localPath;
+    } catch (error) {
+      logger.error(`QQ download file error: ${error}`);
+      return null;
+    }
   }
 
   private extractUserId(handle: string): string {

@@ -228,7 +228,7 @@ export class WeixinChannel extends BaseChannel {
       meta.isGroup = !!groupId;
       meta.weixin_from_user_id = fromUserId;
 
-      if (fromUserId && contextToken) {
+      if (fromUserId && contextToken && this.config.typing_indicator) {
         this.startTyping(fromUserId, contextToken).catch((err) => {
           logger.warn(`WeChat start_typing failed: ${err}`);
         });

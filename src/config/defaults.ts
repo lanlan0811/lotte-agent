@@ -125,6 +125,8 @@ export function getChannelsConfigDefaults(): ChannelsConfig {
       group_policy: "open",
       allow_from: [],
       deny_message: "",
+      typing_indicator: true,
+      voice_asr: false,
     },
     qq: {
       enabled: false,
@@ -133,6 +135,7 @@ export function getChannelsConfigDefaults(): ChannelsConfig {
       bot_prefix: "",
       markdown_enabled: true,
       max_reconnect_attempts: 100,
+      media_dir: "",
     },
     feishu: {
       enabled: false,
