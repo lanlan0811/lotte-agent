@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { GatewayDeps } from "../server.js";
+import { formatErrorMessage } from "../../errors/errors.js";
 
 const VALID_MODULES = [
   "main",
@@ -38,7 +39,7 @@ export function registerConfigRoutes(
       };
       reply.send({ ok: true, data });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "CONFIG_GET_ERROR", message: msg, details: null },
@@ -76,7 +77,7 @@ export function registerConfigRoutes(
 
       reply.send({ ok: true, data: { updated } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "CONFIG_UPDATE_ERROR", message: msg, details: null },
@@ -143,7 +144,7 @@ export function registerConfigRoutes(
 
       reply.send({ ok: true, data });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "CONFIG_GET_ERROR", message: msg, details: null },
@@ -172,7 +173,7 @@ export function registerConfigRoutes(
 
       reply.send({ ok: true, data: { module, updated: true } });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "CONFIG_UPDATE_ERROR", message: msg, details: null },
@@ -221,7 +222,7 @@ export function registerConfigRoutes(
         },
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "PROBE_ERROR", message: msg, details: null },
@@ -250,7 +251,7 @@ export function registerConfigRoutes(
 
       reply.send({ ok: true, data: cache });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.status(500).send({
         ok: false,
         error: { code: "CACHE_ERROR", message: msg, details: null },
@@ -315,7 +316,7 @@ export function registerConfigRoutes(
         });
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       reply.send({
         ok: false,
         error: {

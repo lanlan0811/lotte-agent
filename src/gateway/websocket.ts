@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type { GatewayDeps } from "./server.js";
 import type { EventEmitter } from "./events.js";
+import { formatErrorMessage } from "../errors/errors.js";
 import type { AuthConfig, AuthResult } from "./auth.js";
 import { logger } from "../utils/logger.js";
 
@@ -337,7 +338,7 @@ export class WebSocketManager {
       const result = await this.dispatchMethod(method, params);
       this.sendResponse(clientId, id, true, result);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       this.sendResponse(clientId, id, false, undefined, {
         code: "METHOD_ERROR",
         message: msg,

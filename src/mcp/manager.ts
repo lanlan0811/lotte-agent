@@ -4,6 +4,7 @@ import { EnhancedStatefulClient } from "./stateful-client.js";
 import { RecoveryManager, type RecoveryPhase, type RecoveryConfig } from "./recovery.js";
 import { MCPStatefulClient, type MCPTool } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { formatErrorMessage } from "../errors/errors.js";
 
 const CONNECT_TIMEOUT = 60_000;
 const RECONNECT_BASE_DELAY = 2000;
@@ -57,7 +58,7 @@ export class MCPClientManager {
         if (entry) {
           entry.recoveryState = newState;
         }
-        logger.debug(`MCP client '${key}' recovery state: ${oldState} â†’ ${newState}`);
+        logger.debug(`MCP client '${key}' recovery state: ${oldState} â†?${newState}`);
       },
       recovered: (key) => {
         const entry = this.entries.get(key);
@@ -116,7 +117,7 @@ export class MCPClientManager {
         await this.addClient(key, clientConfig);
         logger.info(`MCP client '${key}' initialized successfully`);
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.warn(`Failed to initialize MCP client '${key}': ${msg}`);
         this.entries.set(key, this.defaultEntry(key, new StatefulMCPClient(clientConfig), "error", msg));
       }
@@ -133,7 +134,7 @@ export class MCPClientManager {
         this.entries.set(key, entry);
         return;
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         const fallbackClient = new EnhancedStatefulClient(config);
         this.entries.set(key, this.defaultEntry(key, fallbackClient, "error", msg));
         throw error;
@@ -150,7 +151,7 @@ export class MCPClientManager {
       entry.connectedAt = Date.now();
       this.entries.set(key, entry);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       this.entries.set(key, this.defaultEntry(key, client, "error", msg));
       throw error;
     }
@@ -173,7 +174,7 @@ export class MCPClientManager {
         logger.info(`MCP client '${key}' replaced via recovery manager`);
         return;
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatErrorMessage(error);
         logger.warn(`MCP client '${key}' recovery replace failed: ${msg}`);
         throw error;
       }
@@ -194,7 +195,7 @@ export class MCPClientManager {
 
       logger.info(`MCP client '${key}' new connection verified, swapping...`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       try {
         await newClient.close();
       } catch {
@@ -306,7 +307,7 @@ export class MCPClientManager {
       entry.toolFailureTracker.clear();
       logger.info(`MCP client '${key}' reconnected successfully`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       entry.status = "error";
       entry.error = msg;
       this.recordFailure(entry, msg);
@@ -418,7 +419,7 @@ export class MCPClientManager {
       this.recordSuccess(entry, toolName);
       return result;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatErrorMessage(error);
       this.recordFailure(entry, msg, toolName);
       throw error;
     }
