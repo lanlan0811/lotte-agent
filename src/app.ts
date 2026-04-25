@@ -12,6 +12,7 @@ import { InMemoryMemory } from "./memory/short-term.js";
 import { ReActEngine } from "./agent/react-engine.js";
 import { ToolInvoker } from "./agent/tool-invoker.js";
 import { Session } from "./agent/session.js";
+import { AgentTaskQueue } from "./agent/task-queue.js";
 import { HookSystem, CompactionHook, BootGuidanceHook, MemoryGuidanceHook } from "./hooks/index.js";
 import { ToolRegistry, ToolPolicyPipeline, registerAllTools, auditLog, setMemoryManager } from "./tools/index.js";
 import { ApprovalSystem } from "./security/approval.js";
@@ -61,6 +62,7 @@ export class LotteApp {
   private notificationDispatcher: NotificationDispatcher | null = null;
   private multimodalManager: MultimodalManager | null = null;
   private speechToText: SpeechToText | null = null;
+  private agentTaskQueue: AgentTaskQueue | null = null;
   private sessions: Map<string, Session> = new Map();
   private running = false;
 
@@ -161,6 +163,11 @@ export class LotteApp {
         logger.warn(`Failed to load plugin '${manifest.name}': ${error}`);
       }
     }
+
+    this.agentTaskQueue = new AgentTaskQueue({
+      maxConcurrent: mainConfig.agent_concurrency ?? 4,
+      maxConcurrentPerSession: 1,
+    });
 
     this.channelManager = new ChannelManager(
       async (message) => {
@@ -519,6 +526,10 @@ export class LotteApp {
     return this.speechToText;
   }
 
+  getAgentTaskQueue(): AgentTaskQueue | null {
+    return this.agentTaskQueue;
+  }
+
   private extractTextFromMessage(message: import("./channels/types.js").ChannelMessage): string {
     const texts: string[] = [];
     for (const c of message.content) {
@@ -543,6 +554,26 @@ export class LotteApp {
   }
 
   async chat(sessionId: string, message: string): Promise<import("./agent/react-engine.js").ReActResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session.isActive()) throw new Error(`Session is not active: ${sessionId}`);
+
+    if (!this.modelManager || !this.memoryManager || !this.compactor || !this.toolRegistry) {
+      throw new Error("App not fully initialized");
+    }
+
+    if (!this.agentTaskQueue) {
+      return this.executeChat(sessionId, message);
+    }
+
+    return this.agentTaskQueue.enqueue({
+      id: `chat-${sessionId}-${Date.now()}`,
+      sessionId,
+      execute: () => this.executeChat(sessionId, message),
+    });
+  }
+
+  private async executeChat(sessionId: string, message: string): Promise<import("./agent/react-engine.js").ReActResult> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     if (!session.isActive()) throw new Error(`Session is not active: ${sessionId}`);

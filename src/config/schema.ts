@@ -6,6 +6,7 @@ export const LotteConfigSchema = z.object({
   data_dir: z.string().default(""),
   log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
   language: z.string().default("zh-CN"),
+  agent_concurrency: z.number().int().min(1).max(32).default(4),
   modules: z
     .object({
       agent: z.boolean().default(true),

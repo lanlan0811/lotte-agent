@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Plugin, PluginContext, PluginEntry, PluginManifest, PluginToolDefinition, PluginHookDefinition, PluginRouteDefinition } from "./types.js";
+import { loadModuleWithJiti } from "./jiti-loader.js";
 import { logger } from "../utils/logger.js";
 import { formatErrorMessage } from "../errors/errors.js";
 
@@ -186,7 +187,7 @@ export class PluginLoader {
     }
 
     try {
-      const module = await import(mainPath);
+      const module = await loadModuleWithJiti(mainPath) as Record<string, unknown>;
 
       const pluginClass = module.default ?? module.Plugin ?? module[manifest.name];
       if (!pluginClass) {
@@ -194,8 +195,8 @@ export class PluginLoader {
       }
 
       const plugin: Plugin = typeof pluginClass === "function"
-        ? new pluginClass()
-        : pluginClass;
+        ? new (pluginClass as new () => Plugin)()
+        : (pluginClass as Plugin);
 
       plugin.manifest = manifest;
       return plugin;

@@ -187,14 +187,23 @@ export class Database {
 
   private loadVecExtension(): void {
     try {
-      this.db!.loadExtension(
-        process.platform === "win32"
-          ? "sqlite_vec"
-          : "sqlite_vec",
-      );
+      const sqliteVec = require("sqlite-vec") as {
+        load: (db: BetterSqlite3.Database) => void;
+        getLoadablePath: () => string;
+      };
+      sqliteVec.load(this.db!);
       logger.info("sqlite-vec extension loaded successfully");
     } catch (error) {
-      logger.warn(`Failed to load sqlite-vec extension: ${error}. Vector search will use brute-force fallback.`);
+      try {
+        const sqliteVec = require("sqlite-vec") as { getLoadablePath: () => string };
+        const extensionPath = sqliteVec.getLoadablePath();
+        this.db!.loadExtension(extensionPath);
+        logger.info(`sqlite-vec extension loaded from path: ${extensionPath}`);
+      } catch (fallbackError) {
+        logger.warn(
+          `Failed to load sqlite-vec extension: ${fallbackError}. Vector search will use brute-force fallback.`,
+        );
+      }
     }
   }
 

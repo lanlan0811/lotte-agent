@@ -3,8 +3,6 @@ import type BetterSqlite3 from "better-sqlite3";
 import type { RAGDocument, RAGChunk, RAGSearchResult } from "./types.js";
 import { logger } from "../utils/logger.js";
 
-const VEC_DIMENSION = 1536;
-
 function float32ArrayToBuffer(arr: Float32Array): Buffer {
   return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength);
 }

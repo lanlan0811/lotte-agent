@@ -157,7 +157,7 @@ export class ReActEngine {
             this.emitEvent({
               type: "tool_result",
               name: tc.function.name,
-              result: result.content.slice(0, 500),
+              result: typeof result.content === "string" ? result.content.slice(0, 500) : JSON.stringify(result.content).slice(0, 500),
             });
             this.memory.addMessage(result);
           }

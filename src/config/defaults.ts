@@ -20,6 +20,7 @@ export function getMainConfigDefaults(): LotteConfig {
     data_dir: "",
     log_level: "info",
     language: "zh-CN",
+    agent_concurrency: 4,
     modules: {
       agent: true,
       gateway: true,

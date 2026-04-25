@@ -522,6 +522,8 @@ export class MCPClientManager {
     toolCount: number;
     connectedAt?: number;
     recoveryState?: RecoveryPhase;
+    circuitBreaker: CircuitBreakerState;
+    toolFailures: Record<string, number>;
   }> {
     const result: Record<string, {
       status: string;
@@ -531,9 +533,21 @@ export class MCPClientManager {
       toolCount: number;
       connectedAt?: number;
       recoveryState?: RecoveryPhase;
+      circuitBreaker: CircuitBreakerState;
+      toolFailures: Record<string, number>;
     }> = {};
 
     for (const [key, entry] of this.entries) {
+      const toolFailures: Record<string, number> = {};
+      for (const [toolName, failures] of entry.toolFailureTracker) {
+        const recentFailures = failures.filter(
+          (f) => Date.now() - f.timestamp < FAILURE_WINDOW_MS,
+        );
+        if (recentFailures.length > 0) {
+          toolFailures[toolName] = recentFailures.length;
+        }
+      }
+
       result[key] = {
         status: entry.status,
         name: entry.client.name,
@@ -542,6 +556,8 @@ export class MCPClientManager {
         toolCount: entry.client.getToolsSnapshot().length,
         connectedAt: entry.connectedAt,
         recoveryState: entry.recoveryState,
+        circuitBreaker: entry.circuitBreaker,
+        toolFailures,
       };
     }
 
