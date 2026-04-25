@@ -121,15 +121,15 @@ export function registerWebUiRoutes(
   });
 
   if (!basePath) {
-    fastify.get("/", async (req: FastifyRequest, reply: FastifyReply) => {
-      await serveStaticFile(req, reply, root, basePath);
+    fastify.get("/", async (_req: FastifyRequest, reply: FastifyReply) => {
+      await serveStaticFile(_req, reply, root, basePath);
     });
   } else {
-    fastify.get(basePath, async (req: FastifyRequest, reply: FastifyReply) => {
-      reply.redirect(301, `${basePath}/`);
+    fastify.get(basePath, async (_req: FastifyRequest, reply: FastifyReply) => {
+      reply.redirect(`${basePath}/`, 301);
     });
-    fastify.get(`${basePath}/`, async (req: FastifyRequest, reply: FastifyReply) => {
-      await serveStaticFile(req, reply, root, basePath);
+    fastify.get(`${basePath}/`, async (_req: FastifyRequest, reply: FastifyReply) => {
+      await serveStaticFile(_req, reply, root, basePath);
     });
   }
 }

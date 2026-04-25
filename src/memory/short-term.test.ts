@@ -65,7 +65,7 @@ describe("InMemoryMemory", () => {
 
   it("should get messages since timestamp", () => {
     const msg1 = memory.addMessage({ role: "user", content: "First" });
-    const msg2 = memory.addMessage({ role: "user", content: "Second" });
+    memory.addMessage({ role: "user", content: "Second" });
     const since = memory.getMessagesSince(msg1.timestamp);
     expect(since).toHaveLength(2);
   });

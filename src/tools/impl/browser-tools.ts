@@ -402,7 +402,7 @@ export const browserScrollTool: ToolDefinition = {
           right: [parsed.amount, 0],
         };
         const [dx, dy] = scrollMap[parsed.direction] ?? [0, 0];
-        await element.evaluate((el, scrollX, scrollY) => el.scrollBy(scrollX, scrollY), dx, dy);
+        await element.evaluate((el, arg) => el.scrollBy(arg.dx, arg.dy), { dx, dy });
       } else {
         const scrollMap: Record<string, { x: number; y: number }> = {
           up: { x: 0, y: -parsed.amount },

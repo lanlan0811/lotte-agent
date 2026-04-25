@@ -10,7 +10,9 @@ function createMockClientConfig(overrides: Partial<MCPClientConfig> = {}): MCPCl
     transport: "stdio",
     command: "echo",
     args: [],
+    headers: {},
     env: {},
+    cwd: "",
     ...overrides,
   };
 }
@@ -107,7 +109,7 @@ describe("MCPClientManager", () => {
     await manager.initFromConfig(config);
     const status = manager.getStatus();
     expect(status.test_client).toBeDefined();
-    expect(status.test_client.status).toBe("error");
+    expect(status.test_client!.status).toBe("error");
   }, 15000);
 
   it("should return empty tools array when no clients connected", () => {

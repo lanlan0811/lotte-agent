@@ -12,7 +12,7 @@ import type {
 } from "../channels/types.js";
 
 class MockChannel extends BaseChannel {
-  readonly channelType: ChannelType = "mock";
+  readonly channelType: ChannelType = "console";
   readonly channelName = "Mock Channel";
   sentTexts: Array<{ toHandle: string; text: string }> = [];
   sentResponses: Array<{ response: ChannelResponse; meta?: Record<string, unknown> }> = [];

@@ -93,7 +93,7 @@ export class DualLevelDebouncer {
   }
 
   cleanupAll(): void {
-    for (const [key, state] of this.states) {
+    for (const [_key, state] of this.states) {
       if (state.userTimer) clearTimeout(state.userTimer);
       if (state.sessionTimer) clearTimeout(state.sessionTimer);
       if (state.typingTimer) clearInterval(state.typingTimer);

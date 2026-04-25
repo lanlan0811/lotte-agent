@@ -209,8 +209,9 @@ export class TriggerManager {
     if (tokens.length > 0 && tokens[0] === "(") {
       tokens.shift();
       const result = this.parseOr(tokens, payload, event);
-      if (tokens.length > 0 && tokens[0] === ")") {
-        tokens.shift();
+      const next = tokens.shift();
+      if (next !== ")") {
+        if (next !== undefined) tokens.unshift(next);
       }
       return result;
     }
@@ -303,8 +304,9 @@ export class TriggerManager {
     if (tokens.length > 0 && tokens[0] === "[") {
       tokens.shift();
       const indexStr = tokens.shift();
-      if (tokens.length > 0 && tokens[0] === "]") {
-        tokens.shift();
+      const closing = tokens.shift();
+      if (closing !== "]") {
+        if (closing !== undefined) tokens.unshift(closing);
       }
       const index = Number(indexStr);
       if (Array.isArray(value) && !isNaN(index)) {

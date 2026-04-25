@@ -8,13 +8,15 @@ export default defineConfig({
   clean: true,
   dts: true,
   sourcemap: true,
-  external: [
-    "better-sqlite3",
-    "sharp",
-    "@lydell/node-pty",
-    "playwright-core",
-    "fluent-ffmpeg",
-    "screenshot-desktop",
-    "pdfjs-dist",
-  ],
+  deps: {
+    neverBundle: [
+      "better-sqlite3",
+      "sharp",
+      "@lydell/node-pty",
+      "playwright-core",
+      "fluent-ffmpeg",
+      "screenshot-desktop",
+      "pdfjs-dist",
+    ],
+  },
 });

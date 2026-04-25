@@ -4,7 +4,6 @@ import type {
   ChatCompletionResponse,
   StreamCallback,
   ChatMessage,
-  ContentPart,
   ToolCall,
   ProviderConfig,
 } from "./types.js";

@@ -69,8 +69,8 @@ describe("AIConfigSchema", () => {
       },
     });
     expect(config.providers.openai).toBeDefined();
-    expect(config.providers.openai.api_url).toBe("https://api.openai.com/v1");
-    expect(config.providers.openai.models["gpt-4o"]).toBeDefined();
+    expect(config.providers.openai!.api_url).toBe("https://api.openai.com/v1");
+    expect(config.providers.openai!.models["gpt-4o"]).toBeDefined();
   });
 
   it("should accept model aliases", () => {

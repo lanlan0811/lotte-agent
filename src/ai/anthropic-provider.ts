@@ -12,21 +12,21 @@ import type { ProviderConfig } from "./types.js";
 import { extractTextContent } from "./types.js";
 import { logger } from "../utils/logger.js";
 
-function extractAnthropicContentParts(content: string | ContentPart[]): Anthropic.ContentBlockParam[] {
+function extractAnthropicContentParts(content: string | ContentPart[]): Array<Record<string, unknown>> {
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
   }
-  return content.map((part): Anthropic.ContentBlockParam => {
+  return content.map((part): Record<string, unknown> => {
     if (part.type === "text") {
       return { type: "text", text: part.text };
     }
     return {
-      type: "image" as const,
+      type: "image",
       source: {
-        type: "url" as const,
+        type: "url",
         url: part.image_url.url,
       },
-    } as Anthropic.ImageBlockParam;
+    };
   });
 }
 
@@ -195,7 +195,7 @@ export class AnthropicProvider extends BaseProvider {
       if (msg.role === "user") {
         const hasImageParts = typeof msg.content !== "string" && msg.content.some((p) => p.type === "image_url");
         if (hasImageParts) {
-          result.push({ role: "user", content: extractAnthropicContentParts(msg.content) });
+          result.push({ role: "user", content: extractAnthropicContentParts(msg.content) as unknown as Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolUseBlockParam | Anthropic.ToolResultBlockParam> });
         } else {
           result.push({ role: "user", content: extractTextContent(msg.content) });
         }

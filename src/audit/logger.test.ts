@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { AuditLog } from "../audit/logger.js";
-import type { AuditEntry } from "../audit/logger.js";
 
 describe("AuditLog", () => {
   let auditLog: AuditLog;

@@ -307,7 +307,7 @@ export class VMSandbox {
     visitor(node);
 
     for (const key of Object.keys(node)) {
-      const val = (node as Record<string, unknown>)[key];
+      const val = (node as unknown as Record<string, unknown>)[key];
       if (Array.isArray(val)) {
         for (const item of val) {
           if (item && typeof item === "object" && item.type) {
@@ -357,6 +357,7 @@ export class VMSandbox {
     if (args.length === 0) return null;
 
     const firstArg = args[0];
+    if (!firstArg) return null;
     if (firstArg.type === "Literal" && typeof firstArg.value === "string") {
       return firstArg.value;
     }
