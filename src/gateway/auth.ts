@@ -58,6 +58,7 @@ function extractBasicAuth(request: FastifyRequest): { username: string; password
       password: decoded.slice(colonIndex + 1),
     };
   } catch {
+    logger.debug("Failed to decode basic auth credentials");
     return null;
   }
 }

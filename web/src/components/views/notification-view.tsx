@@ -239,6 +239,7 @@ export function NotificationView() {
       setWebhookUrlError("");
       return true;
     } catch {
+      console.debug("[notification] Invalid webhook URL format");
       setWebhookUrlError(t("notification.validation.invalidUrl") || "Invalid URL format");
       return false;
     }
@@ -551,6 +552,7 @@ export function NotificationView() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{getDialogTitle()}</DialogTitle>
+            <DialogDescription>{editingRuleId ? t("notification.editRule") : t("notification.addRule")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">

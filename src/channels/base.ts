@@ -10,6 +10,7 @@ import type {
   MessageContent,
 } from "./types.js";
 import { formatErrorMessage } from "../errors/errors.js";
+import { logger } from "../utils/logger.js";
 
 export abstract class BaseChannel {
   abstract readonly channelType: ChannelType;
@@ -137,7 +138,7 @@ export abstract class BaseChannel {
           payload.meta,
         );
       } catch {
-        // ignore send error
+        logger.debug("Channel message send error ignored");
       }
     }
   }

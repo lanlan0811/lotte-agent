@@ -1,4 +1,5 @@
-const WS_BASE = process.env.NEXT_PUBLIC_WS_BASE || "ws://127.0.0.1:10623";
+import { APP_CONFIG } from "./config";
+
 const AUTH_STORAGE_KEY = "lotte_ws_auth";
 
 export type WsEventType =
@@ -113,7 +114,7 @@ export class WebSocketClient {
   private intentionalClose = false;
   private messageQueue: string[] = [];
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private heartbeatInterval = 30000;
+  private heartbeatInterval = APP_CONFIG.WS_HEARTBEAT_INTERVAL;
   private lastPongTime = 0;
   private missedHeartbeats = 0;
   private maxMissedHeartbeats = 3;
@@ -125,7 +126,7 @@ export class WebSocketClient {
   private authFailed = false;
 
   constructor(url?: string) {
-    this.url = url || `${WS_BASE}/ws`;
+    this.url = url || `${APP_CONFIG.WS_BASE}/ws`;
   }
 
   connect(): void {
@@ -338,6 +339,7 @@ export class WebSocketClient {
         { id: "web-client", version: "0.1.0", platform: "web", mode: "default" },
       );
     } catch {
+      console.debug("[ws-client] HMAC auth failed, falling back to plain credentials");
       this.sendConnectRequest(
         { [creds.mode]: secret },
         { id: "web-client", version: "0.1.0", platform: "web", mode: "default" },

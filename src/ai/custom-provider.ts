@@ -4,11 +4,10 @@ import type {
   ChatCompletionResponse,
   ChatCompletionChunk,
   StreamCallback,
+  ProviderConfig,
 } from "./types.js";
-import type { ProviderConfig } from "./types.js";
+import { AI_TIMEOUT_MS } from "./types.js";
 import { logger } from "../utils/logger.js";
-
-const DEFAULT_TIMEOUT_MS = 60000;
 
 export class CustomProvider extends BaseProvider {
   readonly id = "custom";
@@ -38,7 +37,7 @@ export class CustomProvider extends BaseProvider {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS.DEFAULT),
       });
 
       if (!response.ok) {
@@ -76,7 +75,7 @@ export class CustomProvider extends BaseProvider {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS.DEFAULT),
       });
 
       if (!response.ok) {
@@ -163,7 +162,7 @@ export class CustomProvider extends BaseProvider {
 
             callback(chunk);
           } catch {
-            // Skip malformed JSON
+            logger.debug("Custom provider: skipping malformed JSON chunk");
           }
         }
       }

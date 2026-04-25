@@ -261,7 +261,7 @@ export class StatefulMCPClient extends MCPStatefulClient {
     try {
       await this.transportImpl.close();
     } catch {
-      // Ignore close errors during force close
+      logger.debug(`MCP client force close error: ${this.name}`);
     }
   }
 }

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { logger } from "../utils/logger.js";
 
 const STATE_DIRNAME = ".lotte";
 const CONFIG_FILENAME = "lotte.json";
@@ -131,6 +132,6 @@ export function setFilePermissions(filePath: string, mode: number): void {
   try {
     fs.chmodSync(filePath, mode);
   } catch {
-    // Permissions may not be changeable on some platforms
+    logger.debug(`Failed to set file permissions: ${filePath}`);
   }
 }

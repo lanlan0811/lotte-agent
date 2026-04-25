@@ -324,7 +324,7 @@ export class ClientRecovery {
       try {
         await this.rebuild();
       } catch {
-        // scheduleReconnect is called inside rebuild on failure
+        logger.debug("MCP recovery rebuild failed, scheduleReconnect will retry");
       }
     }, delay);
   }

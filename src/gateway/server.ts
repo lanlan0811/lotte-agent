@@ -136,7 +136,7 @@ export class Gateway {
               return;
             }
           } catch {
-            // fall through to SPA fallback
+            logger.debug("Static file serve failed, falling through to SPA fallback");
           }
 
           const indexPath = path.join(webRoot, "index.html");
@@ -214,9 +214,11 @@ export class Gateway {
           return real;
         }
       } catch {
-        // fall through
+        logger.debug(`Configured Web UI root not accessible: ${configuredRoot}`);
       }
+
       logger.warn(`Configured Web UI root not found or invalid: ${configuredRoot}`);
+
     }
 
     const candidates = [
@@ -232,7 +234,7 @@ export class Gateway {
           return real;
         }
       } catch {
-        // continue
+        logger.debug("Web UI root candidate not accessible");
       }
     }
 

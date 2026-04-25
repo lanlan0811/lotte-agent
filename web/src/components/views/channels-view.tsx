@@ -89,7 +89,7 @@ export function ChannelsView() {
       await loadChannels();
       setConfigTarget(null);
     } catch {
-      // invalid JSON
+      console.debug("[channels] Invalid JSON in channel config save");
     }
     setSaving(false);
   };
@@ -145,8 +145,8 @@ export function ChannelsView() {
       {channels.length > 0 ? (
         <ScrollArea className="h-[calc(100vh-200px)]">
           <div className="grid gap-3 md:grid-cols-2">
-            {channels.map((channel) => (
-              <Card key={channel.channelName}>
+            {channels.map((channel, idx) => (
+              <Card key={`${channel.channelType}-${channel.channelName}-${idx}`}>
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">

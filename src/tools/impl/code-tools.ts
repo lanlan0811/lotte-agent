@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ToolDefinition } from "../tool-registry.js";
 import { formatErrorMessage } from "../../errors/errors.js";
+import { logger } from "../../utils/logger.js";
 
 export const codeSearchSchema = z.object({
   pattern: z.string().describe("Search pattern (regex supported)"),
@@ -55,7 +56,7 @@ function searchInFile(
       }
     }
   } catch {
-    // skip unreadable files
+    logger.debug("Skip unreadable file during search");
   }
 
   return results;
@@ -100,7 +101,7 @@ function walkDirectory(dirPath: string, filePattern?: string): string[] {
         }
       }
     } catch {
-      // skip inaccessible directories
+      logger.debug("Skip inaccessible directory during walk");
     }
   }
 
@@ -257,7 +258,7 @@ export const codeAnalyzeTool: ToolDefinition = {
           try {
             stats.push(analyzeFile(file));
           } catch {
-            // skip unreadable files
+            logger.debug(`Skip unreadable file during stats: ${file}`);
           }
         }
 
@@ -353,7 +354,7 @@ export const codeAnalyzeTool: ToolDefinition = {
             const relativePath = path.relative(analyzePath, file);
             deps[relativePath] = [...new Set(fileDeps)];
           } catch {
-            // skip
+            logger.debug(`Skip file during dependency analysis: ${file}`);
           }
         }
 
@@ -389,7 +390,7 @@ export const codeAnalyzeTool: ToolDefinition = {
               ratio,
             });
           } catch {
-            // skip
+            logger.debug(`Skip file during complexity analysis: ${file}`);
           }
         }
 

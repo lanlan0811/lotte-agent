@@ -9,12 +9,8 @@ import type {
   ToolCall,
 } from "./types.js";
 import type { ProviderConfig } from "./types.js";
+import { extractTextContent } from "./types.js";
 import { logger } from "../utils/logger.js";
-
-function extractTextContent(content: string | ContentPart[]): string {
-  if (typeof content === "string") return content;
-  return content.filter((p) => p.type === "text").map((p) => p.text).join("");
-}
 
 function extractAnthropicContentParts(content: string | ContentPart[]): Anthropic.ContentBlockParam[] {
   if (typeof content === "string") {

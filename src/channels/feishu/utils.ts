@@ -6,6 +6,7 @@ import {
   MAX_TABLES_PER_CARD,
   FEISHU_MEDIA_SUBDIR,
 } from "./constants.js";
+import { logger } from "../../utils/logger.js";
 
 export function shortSessionIdFromFullId(fullId: string): string {
   const n = FEISHU_SESSION_ID_SUFFIX_LEN;
@@ -31,6 +32,7 @@ export function extractJsonKey(
   try {
     data = JSON.parse(content) as Record<string, unknown>;
   } catch {
+    logger.debug("Feishu utils: failed to parse JSON content for extractValue");
     return undefined;
   }
   for (const k of keys) {
@@ -82,6 +84,7 @@ export function extractPostText(content: string | undefined | null): string | un
   try {
     data = JSON.parse(content) as Record<string, unknown>;
   } catch {
+    logger.debug("Feishu utils: failed to parse JSON content for extractPostText");
     return undefined;
   }
   if (typeof data !== "object" || data === null) return undefined;
@@ -136,6 +139,7 @@ function extractPostKeys(
   try {
     data = JSON.parse(content) as Record<string, unknown>;
   } catch {
+    logger.debug("Feishu utils: failed to parse JSON content for extractKeys");
     return [];
   }
   if (typeof data !== "object" || data === null) return [];

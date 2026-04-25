@@ -188,6 +188,7 @@ export class WorkflowEngine {
       if (condition === "failure") return false;
       return condition === "true";
     } catch {
+      logger.debug("Workflow step condition evaluation failed");
       return false;
     }
   }

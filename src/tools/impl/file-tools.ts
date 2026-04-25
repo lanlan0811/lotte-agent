@@ -315,6 +315,7 @@ function matchesGlob(name: string, pattern?: string): boolean {
     const regex = new RegExp(`^${regexStr}$`, "i");
     return regex.test(name);
   } catch {
+    logger.debug(`Invalid regex pattern, falling back to exact match: ${pattern}`);
     return name === pattern;
   }
 }

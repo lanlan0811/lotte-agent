@@ -148,6 +148,7 @@ function computePreviousRun(schedule: CronSchedule, nowMs: number): number | nul
     const prevMs = prev.getTime();
     return Number.isFinite(prevMs) && prevMs < nowMs ? prevMs : null;
   } catch {
+    logger.debug("Failed to parse previous run timestamp");
     return null;
   }
 }

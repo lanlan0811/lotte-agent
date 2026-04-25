@@ -1,3 +1,9 @@
+export const AI_TIMEOUT_MS = {
+  DEFAULT: 60000,
+  LONG_RUNNING: 120000,
+  STT: 120000,
+} as const;
+
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };

@@ -37,7 +37,7 @@ export class ChannelManager {
               await ch.sendTyping(_sessionId);
             }
           } catch {
-            // Ignore typing indicator errors
+            logger.debug("Channel typing indicator error ignored");
           }
         }
       },

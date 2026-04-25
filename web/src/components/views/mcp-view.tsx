@@ -128,6 +128,7 @@ export function McpView() {
         try {
           payload.headers = JSON.parse(editForm.headers);
         } catch {
+          console.debug("[mcp] Failed to parse headers as JSON, using empty object");
           payload.headers = {};
         }
       }

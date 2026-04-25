@@ -212,7 +212,7 @@ export class LotteApp {
           try {
             const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
             return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
-          } catch { return null; }
+          } catch { logger.debug("Channel message handler error"); return null; }
         },
         channelsConfig.weixin,
       );
@@ -225,7 +225,7 @@ export class LotteApp {
           try {
             const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
             return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
-          } catch { return null; }
+          } catch { logger.debug("QQ channel message handler error"); return null; }
         },
         channelsConfig.qq,
       );
@@ -238,7 +238,7 @@ export class LotteApp {
           try {
             const result = await this.chat(msg.sessionId, this.extractTextFromMessage(msg));
             return result ? { toHandle: msg.sessionId, content: [{ type: "text" as const, text: result.response ?? "" }] } : null;
-          } catch { return null; }
+          } catch { logger.debug("Feishu channel message handler error"); return null; }
         },
         channelsConfig.feishu,
       );

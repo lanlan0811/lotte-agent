@@ -1,7 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:10623";
-const API_TIMEOUT = 30000;
-const API_MAX_RETRIES = 2;
-const API_RETRY_DELAY = 1000;
+import { APP_CONFIG } from "./config";
 
 export interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -17,7 +14,7 @@ export class ApiClient {
   private token: string | null = null;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || API_BASE;
+    this.baseUrl = baseUrl || APP_CONFIG.API_BASE;
   }
 
   setToken(token: string | null) {
@@ -31,7 +28,7 @@ export class ApiClient {
   private async request<T>(path: string, options?: RequestInit, retryCount = 0): Promise<ApiResponse<T>> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+      const timeoutId = setTimeout(() => controller.abort(), APP_CONFIG.API_TIMEOUT);
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -51,8 +48,8 @@ export class ApiClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        if ((response.status === 502 || response.status === 503) && retryCount < API_MAX_RETRIES) {
-          await this.delay(API_RETRY_DELAY * (retryCount + 1));
+        if ((response.status === 502 || response.status === 503) && retryCount < APP_CONFIG.API_MAX_RETRIES) {
+          await this.delay(APP_CONFIG.API_RETRY_DELAY * (retryCount + 1));
           return this.request<T>(path, options, retryCount + 1);
         }
 
@@ -88,8 +85,8 @@ export class ApiClient {
         };
       }
 
-      if (retryCount < API_MAX_RETRIES && !(error instanceof TypeError)) {
-        await this.delay(API_RETRY_DELAY * (retryCount + 1));
+      if (retryCount < APP_CONFIG.API_MAX_RETRIES && !(error instanceof TypeError)) {
+        await this.delay(APP_CONFIG.API_RETRY_DELAY * (retryCount + 1));
         return this.request<T>(path, options, retryCount + 1);
       }
 

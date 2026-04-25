@@ -115,6 +115,7 @@ export class TriggerManager {
     try {
       return this.safeEvaluate(condition, payload, event);
     } catch {
+      logger.debug(`Trigger condition evaluation failed: ${condition}`);
       return false;
     }
   }

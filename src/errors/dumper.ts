@@ -103,7 +103,7 @@ export class ErrorDumper {
           cleaned++;
         }
       } catch {
-        // Skip files that can't be stat'd
+        logger.debug(`Failed to stat file during dump cleanup: ${file}`);
       }
     }
 

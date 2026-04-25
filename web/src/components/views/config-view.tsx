@@ -8,6 +8,7 @@ import { useAppStore, type AppConfig } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { wsClient } from "@/lib/ws-client";
+import { APP_CONFIG } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,13 +68,13 @@ export function ConfigView() {
   const [aiProviders, setAiProviders] = useState<AiProvider[]>([]);
   const [gatewayCfg, setGatewayCfg] = useState<GatewayConfig>({
     host: "0.0.0.0",
-    port: 3000,
+    port: APP_CONFIG.DEFAULT_GATEWAY_PORT,
     authMode: "token",
     token: "",
     web: { enabled: false, root: "", basePath: "/" },
   });
   const [toolCfg, setToolCfg] = useState<ToolConfig>({
-    shell: { enabled: true, timeout: 30000 },
+    shell: { enabled: true, timeout: APP_CONFIG.DEFAULT_SHELL_TIMEOUT },
     gitBash: { enabled: true, path: "" },
     fileSystem: { enabled: false, allowedPaths: [] },
   });
@@ -120,8 +121,8 @@ export function ConfigView() {
         const auth = (gw.auth as Record<string, unknown>) || {};
         const web = (gw.web as Record<string, unknown>) || {};
         setGatewayCfg({
-          host: String(gw.host || "127.0.0.1"),
-          port: Number(gw.port || 10623),
+          host: String(gw.host || APP_CONFIG.DEFAULT_GATEWAY_HOST),
+          port: Number(gw.port || APP_CONFIG.DEFAULT_GATEWAY_PORT),
           authMode: String(auth.mode || "token"),
           token: String(auth.token || ""),
           web: {
@@ -138,7 +139,7 @@ export function ConfigView() {
         const git = (tools.git as Record<string, unknown>) || {};
         const file = (tools.file as Record<string, unknown>) || {};
         setToolCfg({
-          shell: { enabled: Boolean(bash.enabled ?? true), timeout: Number(bash.timeout || 30000) },
+          shell: { enabled: Boolean(bash.enabled ?? true), timeout: Number(bash.timeout || APP_CONFIG.DEFAULT_SHELL_TIMEOUT) },
           gitBash: { enabled: Boolean(git.enabled ?? true), path: "" },
           fileSystem: {
             enabled: Boolean(file.enabled ?? false),
@@ -420,7 +421,7 @@ export function ConfigView() {
                   <Label className="text-xs">{t("config.port")}</Label>
                   <Input
                     value={String(gatewayCfg.port)}
-                    onChange={(e) => setGatewayCfg({ ...gatewayCfg, port: parseInt(e.target.value, 10) || 3000 })}
+                    onChange={(e) => setGatewayCfg({ ...gatewayCfg, port: parseInt(e.target.value, 10) || APP_CONFIG.DEFAULT_GATEWAY_PORT })}
                     type="number"
                     className="h-8 text-sm"
                   />
@@ -599,7 +600,7 @@ export function ConfigView() {
                   onChange={(e) =>
                     setToolCfg({
                       ...toolCfg,
-                      shell: { ...toolCfg.shell, timeout: parseInt(e.target.value, 10) || 30000 },
+                      shell: { ...toolCfg.shell, timeout: parseInt(e.target.value, 10) || APP_CONFIG.DEFAULT_SHELL_TIMEOUT },
                     })
                   }
                   type="number"

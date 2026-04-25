@@ -200,7 +200,7 @@ export class ImageOps {
           size: buffer.length,
         };
       } catch {
-        // Fall through to basic metadata
+        logger.debug("ImageOps: failed to get image metadata, falling through to basic metadata");
       }
     }
 

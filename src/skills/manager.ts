@@ -198,7 +198,7 @@ export class SkillManager {
       try {
         unlinkSync(tempPath);
       } catch {
-        // Ignore cleanup errors
+        logger.debug("Failed to cleanup temp file during skill manifest save");
       }
       throw error;
     }
@@ -292,7 +292,7 @@ export class SkillManager {
         }
       }
     } catch {
-      // Ignore read errors
+      logger.debug("Failed to read skill directory during scan");
     }
 
     return result;

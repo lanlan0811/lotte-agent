@@ -80,6 +80,7 @@ export function buildCLI(): Command {
           process.kill(pid, 0);
           console.log(`Status: running (PID: ${pid})`);
         } catch {
+          logger.debug(`Process not running, stale PID file: ${pidFile}`);
           console.log("Status: stopped (stale PID file)");
           fs.unlinkSync(pidFile);
         }
@@ -449,6 +450,7 @@ export function buildCLI(): Command {
               try {
                 clientEntry.args = JSON.parse(opts.args);
               } catch {
+                logger.debug("CLI: invalid args JSON format");
                 console.error("Invalid args JSON format");
                 return;
               }
@@ -461,6 +463,7 @@ export function buildCLI(): Command {
             try {
               clientEntry.env = JSON.parse(opts.env);
             } catch {
+              logger.debug("CLI: invalid env JSON format");
               console.error("Invalid env JSON format");
               return;
             }

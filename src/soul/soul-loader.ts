@@ -79,6 +79,7 @@ export class SoulLoader {
         .filter((f) => f.endsWith(".md"))
         .sort();
     } catch {
+      logger.debug("Soul loader: failed to list soul files");
       return [];
     }
   }

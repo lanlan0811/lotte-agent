@@ -273,6 +273,7 @@ export class AutomationManager {
           const fn = new Function("context", `return (${expression})`);
           return Boolean(fn(Object.fromEntries(context.nodeResults)));
         } catch {
+          logger.debug(`Workflow condition evaluation failed: ${expression}`);
           return false;
         }
       }

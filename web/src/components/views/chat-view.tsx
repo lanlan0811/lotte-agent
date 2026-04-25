@@ -569,6 +569,7 @@ export function ChatView() {
         }
       }
     } catch {
+      console.debug("[chat] Unexpected error during message send");
       updateMessage(sessionId, assistantMsg.id, {
         content: t("chat.unexpectedError") || "An unexpected error occurred.",
         status: "error",

@@ -6,14 +6,10 @@ import type {
   ChatMessage,
   ContentPart,
   ToolCall,
+  ProviderConfig,
 } from "./types.js";
-import type { ProviderConfig } from "./types.js";
+import { AI_TIMEOUT_MS, extractTextContent } from "./types.js";
 import { logger } from "../utils/logger.js";
-
-function extractTextContent(content: string | ContentPart[]): string {
-  if (typeof content === "string") return content;
-  return content.filter((p) => p.type === "text").map((p) => p.text).join("");
-}
 
 interface GeminiContent {
   role: "user" | "model";
@@ -85,7 +81,7 @@ export class GeminiProvider extends BaseProvider {
           "x-goog-api-key": this.getApiKey(),
         },
         body: JSON.stringify(geminiRequest),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS.LONG_RUNNING),
       });
 
       if (!response.ok) {
@@ -116,7 +112,7 @@ export class GeminiProvider extends BaseProvider {
           "x-goog-api-key": this.getApiKey(),
         },
         body: JSON.stringify(geminiRequest),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS.LONG_RUNNING),
       });
 
       if (!response.ok) {

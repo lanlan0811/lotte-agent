@@ -8,6 +8,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { useAppStore } from "@/lib/store";
 import { wsClient } from "@/lib/ws-client";
 import { apiClient } from "@/lib/api-client";
+import { APP_CONFIG } from "@/lib/config";
 import type { WsEvent } from "@/lib/ws-client";
 import type { LogEntry } from "@/lib/store";
 
@@ -35,7 +36,7 @@ export default function Home() {
       }
     });
 
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, APP_CONFIG.HEALTH_CHECK_INTERVAL);
 
     return () => {
       wsClient.disconnect();

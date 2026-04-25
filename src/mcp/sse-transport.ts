@@ -256,6 +256,7 @@ export class SSETransportEnhanced extends MCPTransport {
             const base = new URL(url);
             this.messageEndpoint = new URL(endpointPath, base).href;
           } catch {
+            logger.debug(`[MCP sse:${this.config.name}] Failed to resolve message endpoint URL`);
             this.messageEndpoint = endpointPath;
           }
         }

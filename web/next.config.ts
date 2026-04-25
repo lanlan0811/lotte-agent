@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  allowedDevOrigins: [
+    "127.22.122.1",
+  ],
   turbopack: {
     root: path.resolve(__dirname),
   },

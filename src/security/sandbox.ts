@@ -457,6 +457,7 @@ export class VMSandbox {
       try {
         return require(moduleName);
       } catch {
+        logger.debug(`Sandbox failed to load module: ${moduleName}`);
         throw new Error(`Failed to load module "${moduleName}"`);
       }
     };

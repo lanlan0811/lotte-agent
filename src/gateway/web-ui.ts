@@ -70,7 +70,7 @@ function resolveWebUiRoot(configuredRoot: string): string | null {
         return real;
       }
     } catch {
-      // continue
+      logger.debug("Web UI root candidate not accessible");
     }
   }
 
@@ -198,7 +198,7 @@ async function serveStaticFile(
       return;
     }
   } catch {
-    // fall through to SPA fallback
+    logger.debug("Web UI root resolution failed, falling through");
   }
 
   const indexPath = path.join(root, INDEX_HTML);
@@ -211,7 +211,7 @@ async function serveStaticFile(
       return;
     }
   } catch {
-    // fall through
+    logger.debug("Web UI root resolution failed, falling through");
   }
 
   reply.code(404).send("Not Found");

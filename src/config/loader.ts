@@ -477,7 +477,7 @@ export class ConfigLoader {
         const parsed = JSON.parse(raw);
         configToWrite = restoreEnvVarRefs(config, parsed) as T;
       } catch {
-        // If we can't read the existing file, write the config as-is
+        logger.debug("Config loader: failed to read existing file for env var restoration");
       }
     }
 
@@ -499,7 +499,7 @@ export class ConfigLoader {
         const parsed = JSON.parse(raw);
         configToWrite = restoreEnvVarRefs(config, parsed) as T;
       } catch {
-        // If we can't read the existing file, write the config as-is
+        logger.debug("Config loader: failed to read existing module file for env var restoration");
       }
     }
 

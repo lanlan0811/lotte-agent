@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { STTConfig, STTResult } from "./types.js";
+import { AI_TIMEOUT_MS } from "../ai/types.js";
 import { logger } from "../utils/logger.js";
 
 export class SpeechToText {
@@ -141,7 +142,7 @@ export class SpeechToText {
           ? { Authorization: `Bearer ${this.config.api_key}` }
           : {},
         body: formData,
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS.STT),
       });
 
       if (!response.ok) {

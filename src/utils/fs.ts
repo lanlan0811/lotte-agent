@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { logger } from "./logger.js";
 
 export function ensureDir(dirPath: string, mode = 0o700): void {
   if (!fs.existsSync(dirPath)) {
@@ -41,6 +42,7 @@ export function fileExists(filePath: string): boolean {
     fs.accessSync(filePath, fs.constants.F_OK);
     return true;
   } catch {
+    logger.debug(`File access check failed: ${filePath}`);
     return false;
   }
 }
@@ -50,6 +52,7 @@ export function dirExists(dirPath: string): boolean {
     const stat = fs.statSync(dirPath);
     return stat.isDirectory();
   } catch {
+    logger.debug(`Directory check failed: ${dirPath}`);
     return false;
   }
 }
@@ -84,7 +87,7 @@ export function safeRemove(filePath: string): void {
       }
     }
   } catch {
-    // Best effort removal
+    logger.debug("Best effort directory removal failed");
   }
 }
 

@@ -363,6 +363,7 @@ export function LogsView() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("logs.details")}</DialogTitle>
+            <DialogDescription>{showDetail?.message?.slice(0, 80) || ""}</DialogDescription>
           </DialogHeader>
           {showDetail && (
             <div className="space-y-3 text-xs">

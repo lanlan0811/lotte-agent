@@ -151,6 +151,7 @@ export function RagView() {
           ),
         );
       } catch {
+        console.debug(`[rag] Failed to upload file: ${file.name}`);
         setUploadProgresses((prev) =>
           prev.map((p) =>
             p.fileName === file.name ? { ...p, status: "error" } : p,

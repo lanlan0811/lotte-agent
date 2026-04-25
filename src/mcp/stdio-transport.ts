@@ -125,6 +125,7 @@ export class StdioTransport extends MCPTransport {
         });
       });
     } catch {
+      logger.debug(`[MCP stdio:${this.config.name}] Failed to spawn process gracefully, killing`);
       this.process.kill("SIGKILL");
     }
 

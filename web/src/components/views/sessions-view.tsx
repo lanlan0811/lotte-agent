@@ -468,6 +468,7 @@ export function SessionsView() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{t("sessions.detailTitle") || "会话详情"}</DialogTitle>
+            <DialogDescription>{detailTarget?.id || ""}</DialogDescription>
           </DialogHeader>
           {detailTarget && (
             <div className="space-y-3 text-sm">

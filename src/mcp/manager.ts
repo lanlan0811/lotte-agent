@@ -162,7 +162,7 @@ export class MCPClientManager {
       try {
         await this.recoveryManager.removeClient(key);
       } catch {
-        // Ignore removal errors
+        logger.debug(`Failed to remove MCP client from recovery: ${key}`);
       }
 
       try {
@@ -199,7 +199,7 @@ export class MCPClientManager {
       try {
         await newClient.close();
       } catch {
-        // Ignore
+        logger.debug(`Failed to close new MCP client during reconnect: ${key}`);
       }
 
       const oldEntry = this.entries.get(key);
@@ -290,7 +290,7 @@ export class MCPClientManager {
     try {
       await entry.client.close();
     } catch {
-      // ignore
+      logger.debug(`Failed to close MCP client: ${key}`);
     }
 
     entry.status = "connecting";
@@ -337,7 +337,7 @@ export class MCPClientManager {
       try {
         await this.reconnectClient(key);
       } catch {
-        // scheduleReconnect is called inside reconnectClient on failure
+        logger.debug(`MCP client reconnect failed, scheduleReconnect will retry: ${key}`);
       }
     }, delay);
   }

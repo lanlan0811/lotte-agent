@@ -50,7 +50,7 @@ class FileLock {
           this.acquired = true;
           return true;
         } catch {
-          // Race condition, retry
+          logger.debug("Lock file race condition, retrying");
         }
       } else {
         try {
@@ -61,7 +61,7 @@ class FileLock {
             continue;
           }
         } catch {
-          // Lock file was removed between check and read, retry
+          logger.debug("Lock file removed between check and read, retrying");
           continue;
         }
       }
@@ -80,7 +80,7 @@ class FileLock {
         unlinkSync(this.lockPath);
       }
     } catch {
-      // Ignore
+      logger.debug("Lock release failed");
     }
     this.acquired = false;
   }
@@ -434,6 +434,7 @@ export class SkillPoolService {
           signatureMismatches.push(name);
         }
       } catch {
+        logger.debug(`Failed to read skill file for signature check: ${name}`);
         missingFiles.push(name);
       }
     }
@@ -490,7 +491,7 @@ export class SkillPoolService {
       try {
         unlinkSync(tempPath);
       } catch {
-        // Ignore cleanup errors
+        logger.debug("Failed to cleanup temp file during atomic write");
       }
       throw error;
     }
@@ -570,7 +571,7 @@ export class SkillPoolService {
         }
       }
     } catch {
-      // Ignore read errors
+      logger.debug("Failed to read skill directory tree");
     }
 
     return result;

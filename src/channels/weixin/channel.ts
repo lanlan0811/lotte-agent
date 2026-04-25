@@ -94,7 +94,7 @@ export class WeixinChannel extends BaseChannel {
           const fs = await import("node:fs/promises");
           token = (await fs.readFile(this.config.bot_token_file, "utf-8")).trim();
         } catch {
-          // file not found, will try QR login
+          logger.debug(`WeChat token file not found, will try QR login`);
         }
       }
 
